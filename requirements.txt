@@ -1,0 +1,7 @@
+discord-py-interactions
+python-dotenv
+spotipy
+pytz
+pandas
+requests
+python-dotenv

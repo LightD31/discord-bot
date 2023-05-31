@@ -1,0 +1,48 @@
+startList = ["Hey", "Salut", "Plop", "Coucou",
+             "Yo", "Salutations", "Hiya", "Hello"]
+finishList = [
+    "ta chanson a été ajoutée",
+    "ton banger est là",
+    "que du bohneur pour les oreilles",
+    "pas mal la nouvelle chanson",
+    "merci du partage",
+    "et voilà, une de plus",
+    "c'est bon, c'est ajouté",
+]
+activityList = [
+    "Petite cuillère",
+    "Vous êtes moches",
+    "Wagon-citerne",
+    "UwU",
+    "42",
+    ":rooPeek:",
+    "Mangez des pommes",
+    "P'tite bière ?",
+    "Bip-boup",
+    ":robot:",
+    "Sumimaseeeen",
+    "Au coin !",
+]
+spotify2name = {
+    "ex0948b7f20h0250few6tfwbu": "Tom",
+    "0xa79fvkw0b8hro5fhetzph30": "Solal",
+    "315mbpaqcy7t7mewgq2execyqe4i": "Iléa",
+    "nøv3m": "Adi",
+    "sakki-san": "Clo",
+    "ig5kdpn20vjfgskaxgufhaaq6": "Audrey",
+    "21lh7dlg3r3sqj7qo2lk47xhi": "Louyette",
+    "21y3upitkuc2cbexd2ew2kvly": "Noémie",
+    "ywm6kti1t4vhhsxwmfda3h39q": "Loïc",
+    "11135978441": "Hermann",
+}
+spotify2id = {
+    "ex0948b7f20h0250few6tfwbu": "108967780224614400",
+    "0xa79fvkw0b8hro5fhetzph30": "136812651933073409",
+    "315mbpaqcy7t7mewgq2execyqe4i": "136900489576054785",
+    "nøv3m": "136925918823186432",
+    "sakki-san": "137912816962240512",
+    "ig5kdpn20vjfgskaxgufhaaq6": "143124783465234433",
+    "21lh7dlg3r3sqj7qo2lk47xhi": "218302776491376641",
+    "ywm6kti1t4vhhsxwmfda3h39q": "168762244182573057",
+    "11135978441": "149237199324315648",
+}
