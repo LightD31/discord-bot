@@ -58,6 +58,7 @@ def spotify_auth():
         # Generate the authorization URL and prompt the user to visit it
         auth_url = sp_oauth.get_authorize_url()
         logger.warn(f"Please visit this URL to authorize the application: {auth_url}")
+        print("Please visit this URL to authorize the application: {}".format(auth_url))
 
         # Wait for the user to input the response URL after authenticating
         auth_code = input("Enter the response URL: ")
@@ -79,7 +80,10 @@ sp = spotify_auth()
 class Spotify(interactions.Extension):
     def __init__(self, bot: interactions.client):
         self.bot = bot
-
+    @interactions.listen()
+    async def on_startup(self):
+        self.check_playlist_changes.start()
+        self.randomvote.start()
     @interactions.slash_command(
         "addsong",
         description="Ajoute une chanson à la playlist de la guilde.",
@@ -173,7 +177,7 @@ class Spotify(interactions.Extension):
                 ]
         await ctx.send(choices=choices)
 
-    @interactions.Task.create(interactions.TimeTrigger(hour=12, minute=45, utc=False))
+    @interactions.Task.create(interactions.TimeTrigger(hour=12, minute=52, utc=False))
     async def randomvote(self):
         logger.info("Tache randomvote lancée")
         with open("data/votesinfo.txt", "r") as f:
@@ -228,7 +232,7 @@ class Spotify(interactions.Extension):
             )
             sp.playlist_remove_all_occurrences_of_items(PLAYLIST_ID, [track_id])
             logger.info("La chanson a été supprimée.")
-
+            await Spotify.check_playlist_changes(self)
         with open("data/votes.txt", "w") as f:
             f.write("")
             logger.debug("votes.txt vidé")
@@ -255,7 +259,7 @@ class Spotify(interactions.Extension):
                     track,
                     "Vote ouvert jusqu'à "
                     + str(
-                        interactions.utils.timestamp_converter(self.randomvote.next_run)
+                        interactions.utils.timestamp_converter(self.randomvote.next_run).format(interactions.TimestampStyles.RelativeTime)
                     ),
                 ),
                 await embed_message_vote(),
@@ -285,9 +289,62 @@ class Spotify(interactions.Extension):
         with open("data/pollhistory.txt", "a") as file:
             file.write("\n" + track_id)
             logger.debug("pollhistory.txt écrit")
+    @interactions.listen()
+    async def on_component(self, event: interactions.api.events.Component):
+        """Called when a component is clicked"""
+        ctx = event.ctx
+        embed_original = ctx.message.embeds[0]
+        # Read the votes from the file into a dictionary
+        if ctx.custom_id == "keep":
+            txtvote = "conserver"
+        else:
+            txtvote = "supprimer"
+        votes = {}
+        with open("data/votes.txt", "r") as f:
+            for line in f:
+                user_id, vote = line.strip().split(":")
+                votes[user_id] = vote
+
+        # Check if the user has already voted and update their vote if necessary
+        if str(ctx.user.id) in votes:
+            old_vote = votes[str(ctx.user.id)]
+            if old_vote == ctx.custom_id:
+                await ctx.send(f"tu as déjà voté pour {txtvote} cette chanson !", ephemeral=True)
+                logger.info(f"User {ctx.user.username} tried to vote twice")
+                return
+            votes[str(ctx.user.id)] = ctx.custom_id
+            with open("data/votes.txt", "r+") as f:
+                content = f.read()
+                f.seek(0)
+                f.write(content.replace(f"{ctx.user.id}:{old_vote}", f"{ctx.user.id}:{ctx.custom_id}"))
+                f.truncate()
+                logger.info(f"User {ctx.user.username} changed their vote to {ctx.custom_id}")
+
+        # Add the user's vote to the file if they haven't voted yet
+        else:
+            with open("data/votes.txt", "a") as f:
+                f.write(f"{ctx.user.id}:{ctx.custom_id}\n")
+                logger.info(f"User {ctx.user.username} voted {ctx.custom_id}")
+                votes[str(ctx.user.id)] = ctx.custom_id
+        # Count the votes
+        vote_counts = {}
+        for vote in votes.values():
+            if vote in vote_counts:
+                vote_counts[vote] += 1
+            else:
+                vote_counts[vote] = 1
+        # Count votes by adding up the number of lines with each vote
+        keep = vote_counts.get("keep", 0)
+        remove = vote_counts.get("remove", 0)
+        await ctx.message.edit(
+            embeds=[embed_original, await embed_message_vote(keep, remove)]
+        )
+
+        await ctx.send(f"Ton vote pour **{txtvote}** cette musique a bien été pris en compte ! 🗳️", ephemeral=True)
 
     @interactions.Task.create(interactions.IntervalTrigger(minutes=1, seconds=0))
     async def check_playlist_changes(self):
+        logger.debug("check_playlist_changes lancé")
         channel = await self.bot.fetch_channel(CHANNEL_ID)
         await self.bot.change_presence(
             status=interactions.Status.ONLINE,
@@ -389,7 +446,7 @@ class Spotify(interactions.Extension):
                     embed = await embed_message_addremove(
                         track,
                         delete=True,
-                        time=interactions.utils.timestamp_converter(datetime.now()),
+                        time=interactions.Timestamp.utcnow(),
                     )
                     channel = await self.bot.fetch_channel(CHANNEL_ID)
                     await channel.send(embeds=embed)
@@ -399,11 +456,10 @@ class Spotify(interactions.Extension):
             with open("data/snapshot.txt", "w") as f:
                 f.write(str(new_snap) + "\n" + str(duration) + "\n" + str(length))
         await bot_presence(self)
-        requests.patch(
+        message3 = requests.patch(
             url=PATCH_MESSAGE_URL,
             json={
-                "username": "DJ Guildeux",
-                "avatar_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Spotify_logo_without_text.svg/200px-Spotify_logo_without_text.svg.png",
-                "content": f"Dernière màj de la playlist le {interactions.utils.timestamp_converter(datetime.now())}, si c'était il y a plus d' **une minute**, il y a probablement un problème\n`/addsong Titre et artiste de la chanson` pour ajouter une chanson\nIl y a actuellement **{length}** chansons dans la playlist, pour un total de **{milliseconds_to_string(duration)}**",
+                "content": f"Dernière màj de la playlist {interactions.Timestamp.utcnow().format(interactions.TimestampStyles.RelativeTime)}, si c'était il y a plus d'**une minute**, il y a probablement un problème\n`/addsong Titre et artiste de la chanson` pour ajouter une chanson\nIl y a actuellement **{length}** chansons dans la playlist, pour un total de **{milliseconds_to_string(duration)}**",
             },
         )
+        message3.raise_for_status()
