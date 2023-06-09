@@ -331,7 +331,7 @@ class Spotify(interactions.Extension):
 				)
 				f.truncate()
 				logger.info(
-					f"User {ctx.user.username} changed their vote to {ctx.custom_id}"
+					f"User {ctx.user.username} voted {ctx.custom_id} (changed from {old_vote}))"
 				)
 
 		# Add the user's vote to the file if they haven't voted yet
