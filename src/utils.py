@@ -18,6 +18,9 @@ def milliseconds_to_string(duration_ms):
     seconds %= 60
     return f"{int(days)} jour(s) {int(hours):02d} heure(s) {int(minutes):02d} minute(s) et {int(seconds):02d} seconde(s)"
 
+# Create a dictionary to cache generated images
+image_cache = {}
+
 def create_dynamic_image(
     text: str,
     font_size: int = 20,
@@ -78,6 +81,14 @@ def create_dynamic_image(
     imageIO = BytesIO()
     image.save(imageIO, "png")
     imageIO.seek(0)
+
+    # Cache the generated image, overwriting any existing image for the same text input
+    image_cache[text] = (image, imageIO)
+
+    # If the cache contains more than one element, remove the oldest element
+    if len(image_cache) > 1:
+        oldest_text = min(image_cache.keys(), key=lambda k: image_cache[k][1].getbuffer().nbytes)
+        del image_cache[oldest_text]
 
     return image, imageIO
 

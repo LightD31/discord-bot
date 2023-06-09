@@ -37,43 +37,38 @@ class Minecraft(interactions.Extension):
     @interactions.Task.create(interactions.IntervalTrigger(seconds=30))
     async def status(self, serverColoc=serverColoc):
         logger.debug("Updating Minecraft server status")
+        channel = await self.bot.fetch_channel(CHANNEL_ID_KUBZ)
+        message = await channel.fetch_message(MESSAGE_ID_KUBZ)
         try:
             colocStatus = serverColoc.status()
             if colocStatus.players.online > 0:
                 players = "\n".join(
-                        [player.name for player in colocStatus.players.sample]
-                    )
+                    [player.name for player in colocStatus.players.sample]
+                )
                 joueurs = f"Joueur{'s' if colocStatus.players.online > 1 else ''} ({colocStatus.players.online}/{colocStatus.players.max})"
             else:
                 players = "\u200b"
                 joueurs = "\u200b"
-            embed1 = {
-                "description": f"Adresse : `http://{MINECRAFT_ADDRESS}:25565`\nCarte : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124 'Dynmap')\nStats : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124/stats/index.html 'Stats')",
-                "fields": [
-                    {
-                        "name": "Latence",
-                        "value": "{:.2f} ms".format(colocStatus.latency),
-                        "inline": "true",
-                    },
-                    {
-                        "name": joueurs,
-                        "value": players,
-                        "inline": "true",
-                    },
-                    {
-                        "name": "Dernière actualisation",
-                        "value": interactions.Timestamp.utcnow().format(
-                            interactions.TimestampStyles.RelativeTime
-                        ),
-                    },
-                ],
-                "title": "Serveur " + str(colocStatus.version.name),
-                "footer": {"text": "Serveur Minecraft du believe"},
-                "timestamp": interactions.Timestamp.utcnow().isoformat(),
-                "color": 5635925,
-            }
-            embed1 = interactions.Embed.from_dict(embed1)
-            df = pd.DataFrame()
+
+            embed1 = interactions.Embed()
+            embed1.description = f"Adresse : `http://{MINECRAFT_ADDRESS}:25565`\nCarte : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124 'Dynmap')\nStats : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124/stats/index.html 'Stats')"
+            embed1.add_fields(
+                interactions.EmbedField(
+                    "Latence", "{:.2f} ms".format(colocStatus.latency), True
+                ),
+                interactions.EmbedField(joueurs, players, True),
+                interactions.EmbedField(
+                    "Dernière actualisation",
+                    interactions.Timestamp.utcnow().format(
+                        interactions.TimestampStyles.RelativeTime
+                    ),
+                ),
+            )
+            embed1.title = "Serveur " + str(colocStatus.version.name)
+            embed1.set_footer("Serveur Minecraft du believe")
+            embed1.timestamp = interactions.Timestamp.utcnow().isoformat()
+            embed1.color = 0x00AA00
+
             cnopts = pysftp.CnOpts()
             cnopts.hostkeys = None
             with pysftp.Connection(
@@ -155,25 +150,35 @@ class Minecraft(interactions.Extension):
                 table.align["Joueur"] = "l"
                 table.set_style(prettytable.SINGLE_BORDER)
                 table.padding_width = 1
-                image = interactions.File(create_dynamic_image(table.get_string())[1], "stats.png")
+                image = interactions.File(
+                    create_dynamic_image(table.get_string())[1], "stats.png"
+                )
                 embed2 = interactions.Embed(
                     title="Stats",
-                    description=f"```{table.get_string()}```",
+                    images=("attachment://stats.png"),
+                    color=0x00AA00,
                     timestamp=interactions.Timestamp.utcnow().isoformat(),
-                    color=16733525,
                 )
-                embed2 = interactions.Embed(images=("attachment://stats.png"))
-        except ConnectionResetError as e:
-            logger.error(e)
-            embed1 = {
-                "description": "Adresse : `http://" + MINECRAFT_ADDRESS + ":25565`",
-                "title": "Serveur Hors-ligne",
-                "footer": {"text": "Serveur Minecraft du believe"},
-                "timestamp": interactions.Timestamp.utcnow().isoformat(),
-                "color": "16733525",
-            }
-            embed2 = {}
-        channel = await self.bot.fetch_channel(CHANNEL_ID_KUBZ)
-        message = await channel.fetch_message(MESSAGE_ID_KUBZ)
-        await message.edit(content="", embeds=[embed1, embed2], files=image)
-
+                await message.edit(content="", embeds=[embed1, embed2], files=image)
+        except (ConnectionResetError, ConnectionRefusedError) as e:
+            embed1 = interactions.Embed(
+                title="Serveur Hors-ligne",
+                description="Adresse : `http://" + MINECRAFT_ADDRESS + ":25565`",
+                fields=[
+                    {
+                        "name": "Dernière actualisation",
+                        "value": interactions.Timestamp.utcnow().format(
+                            interactions.TimestampStyles.RelativeTime
+                        ),
+                    }
+                ],
+                color=0xAA0000,
+                timestamp=interactions.Timestamp.utcnow().isoformat(),
+            )
+            embed2 = interactions.Embed(
+                title="Stats",
+                images=("attachment://stats.png"),
+                color=0xAA0000,
+                timestamp=interactions.Timestamp.utcnow().isoformat(),
+            )
+            await message.edit(content="", embeds=[embed1, embed2])
