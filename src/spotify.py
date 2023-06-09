@@ -11,7 +11,7 @@ async def embed_message_addremove(
 ):
     if delete:
         msg = "Chanson supprimée de la playlist"
-        footer = "Supprimée"
+        footer = ""
         color = interactions.MaterialColors.RED
     else:
         msg = "Chanson ajoutée à la playlist"
@@ -74,6 +74,7 @@ async def embed_message_vote(keep=0, remove=0, title="Vote déclenché"):
     )
     embed.timestamp = interactions.utils.timestamp_converter(datetime.now())
     return embed
+
 
 async def embed_message_vote_part1(track, title):
     artistes = ", ".join(artist["name"] for artist in track["artists"])

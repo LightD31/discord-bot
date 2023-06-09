@@ -5,3 +5,7 @@ pytz
 pandas
 requests
 python-dotenv
+pysftp
+prettytable
+Pillow
+cachetools

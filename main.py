@@ -9,12 +9,13 @@ import sys
 import interactions
 from dotenv import load_dotenv
 
-from config import DEBUG, DEV_GUILD
+from config import DEBUG
 from src import logutil
 from src.spotify import embed_message_vote
 
-
 load_dotenv()
+
+DEV_GUILD = os.environ.get("DEV_GUILD")
 
 # Configure logging for this main.py handler
 logger = logutil.init_logger("main.py")
@@ -23,7 +24,6 @@ logger.debug(
 just an indicator. You may safely ignore",
     DEBUG,
 )
-
 
 if not os.environ.get("TOKEN"):
     logger.critical("TOKEN variable not set. Cannot continue")
@@ -40,6 +40,7 @@ client = interactions.Client(
 async def on_startup():
     """Called when the bot starts"""
     logger.info(f"Logged in as {client.user}")
+
 
 # get all python files in "extensions" folder
 extensions = [
