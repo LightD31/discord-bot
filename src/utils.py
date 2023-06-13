@@ -1,9 +1,14 @@
+import os
 from io import BytesIO
 from typing import Tuple
 
 from cachetools import FIFOCache
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
+
+from src import logutil
+
+logger = logutil.init_logger(os.path.basename(__file__))
 
 load_dotenv()
 
@@ -17,9 +22,6 @@ def milliseconds_to_string(duration_ms):
     minutes = seconds // 60
     seconds %= 60
     return f"{int(days)} jour(s) {int(hours):02d} heure(s) {int(minutes):02d} minute(s) et {int(seconds):02d} seconde(s)"
-
-# Create a dictionary to cache generated images
-image_cache = {}
 
 def create_dynamic_image(
     text: str,
@@ -82,19 +84,4 @@ def create_dynamic_image(
     image.save(imageIO, "png")
     imageIO.seek(0)
 
-    # Cache the generated image, overwriting any existing image for the same text input
-    image_cache[text] = (image, imageIO)
-
-    # If the cache contains more than one element, remove the oldest element
-    if len(image_cache) > 1:
-        oldest_text = min(image_cache.keys(), key=lambda k: image_cache[k][1].getbuffer().nbytes)
-        del image_cache[oldest_text]
-
     return image, imageIO
-
-
-def ticks_to_hms(ticks):
-    seconds = ticks // 20  # Convert ticks to seconds
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"

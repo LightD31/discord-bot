@@ -4,3 +4,4 @@
 data/*
 .cache
 !data/pollhistory.txt
+.vscode/*

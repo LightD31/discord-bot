@@ -1,5 +1,17 @@
-startList = ["Hey", "Salut", "Plop", "Coucou",
-             "Yo", "Salutations", "Hiya", "Hello"]
+startList = [
+    "Hey",
+    "Salut",
+    "Plop",
+    "Coucou",
+    "Yo",
+    "Salutations",
+    "Hiya",
+    "Hello",
+    "Bonjour",
+    "Wesh",
+    "Hola",
+    "Aloha",
+]
 finishList = [
     "ta chanson a été ajoutée",
     "ton banger est là",
@@ -8,6 +20,15 @@ finishList = [
     "merci du partage",
     "et voilà, une de plus",
     "c'est bon, c'est ajouté",
+    "c'est fait",
+    "c'est ajouté",
+    "super, tu as ajouté une nouvelle chanson",
+    "bravo, la playlist est encore meilleure maintenant",
+    "tu as du goût, cette chanson est top",
+    "excellent choix, cette chanson est géniale",
+    "tu es un vrai mélomane, merci pour cette chanson",
+    "tu as ajouté une chanson de plus, c'est parfait",
+    "la playlist est de plus en plus cool, merci pour cette chanson",
 ]
 activityList = [
     "Petite cuillère",
