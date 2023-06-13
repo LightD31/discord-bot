@@ -166,27 +166,14 @@ class Spotify(interactions.Extension):
         vote_counts = count_votes(votes)
         conserver = vote_counts.get("conserver", 0)
         supprimer = vote_counts.get("supprimer", 0)
-        logger.debug(f"keep : {str(conserver)}")
-        logger.debug(f"remove : {str(supprimer)}")
+        menfou = vote_counts.get("menfou", 0)
+        logger.debug(
+            f"keep : {str(conserver)}\nremove : {str(supprimer)}\nmenfou : {str(menfou)}"
+        )
         song = playlistItemsFull.find_one({"_id": track_id})
         track = sp.track(song["_id"], market="FR")
         await message.unpin()
-        if conserver >= supprimer:
-            await message.edit(
-                content="La chanson a été conservée.",
-                embeds=[
-                    await embed_song(
-                        song=song,
-                        track=track,
-                        type=Type.VOTE_WIN,
-                        time=interactions.Timestamp.utcnow(),
-                    ),
-                    await embed_message_vote(keep=conserver, remove=supprimer),
-                ],
-                components=[],
-            )
-            logger.info("La chanson a été conservée.")
-        else:
+        if supprimer > conserver or (conserver == 0 and supprimer == 0 and menfou >= 2):
             await message.edit(
                 content="La chanson a été supprimée.",
                 embeds=[
@@ -196,6 +183,8 @@ class Spotify(interactions.Extension):
                     await embed_message_vote(
                         keep=conserver,
                         remove=supprimer,
+                        menfou=menfou,
+                         color = interactions.MaterialColors.DEEP_ORANGE,
                     ),
                 ],
                 components=[],
@@ -204,6 +193,21 @@ class Spotify(interactions.Extension):
             playlistItemsFull.delete_one({"_id": track_id})
             logger.info("La chanson a été supprimée.")
             await Spotify.check_playlist_changes()
+        else:
+            await message.edit(
+                content="La chanson a été conservée.",
+                embeds=[
+                    await embed_song(
+                        song=song,
+                        track=track,
+                        type=Type.VOTE_WIN,
+                        time=interactions.Timestamp.utcnow(),
+                    ),
+                    await embed_message_vote(keep=conserver, remove=supprimer,mefou=menfou, color = interactions.MaterialColors.LIME),
+                ],
+                components=[],
+            )
+            logger.info("La chanson a été conservée.")
         track_ids = set(playlistItemsFull.find_one({"_id": track_ids_doc})["track_ids"])
         pollhistory = set(
             playlistItemsFull.find_one({"_id": pollhistory_doc})["pollhistory"]
@@ -221,7 +225,7 @@ class Spotify(interactions.Extension):
         logger.info("--------------------votedone--------------------")
         channel = await self.bot.fetch_channel(CHANNEL_ID)
         message = await channel.send(
-            content="Voulez-vous conserver cette chanson dans playlist ?",
+            content=f"Voulez-vous conserver cette chanson dans playlist ? (poke <@{song['added_by']}>)",
             embeds=[
                 await embed_song(
                     song=song,
@@ -229,7 +233,7 @@ class Spotify(interactions.Extension):
                     type=Type.VOTE,
                     time=str(self.randomvote.next_run),
                 ),
-                await embed_message_vote(),
+                # await embed_message_vote(),
             ],
             components=[
                 interactions.ActionRow(
@@ -290,13 +294,19 @@ class Spotify(interactions.Extension):
             remove = vote_counts.get("supprimer", 0)
             menfou = vote_counts.get("menfou", 0)
 
+            logger.info(f"Votes : {keep} conserver, {remove} supprimer, {menfou} menfou")
+            embed_original.fields[4].value=f"{keep+remove+menfou} votes"
+            # await ctx.message.edit(content=f"Voulez-vous conserver cette chanson dans playlist ?")
             # Update the message with the vote counts
+
             await ctx.message.edit(
                 embeds=[
                     embed_original,
-                    await embed_message_vote(keep, remove, menfou),
+                    # await embed_message_vote(keep, remove, menfou),
+
                 ]
             )
+
 
             # Send a message to the user informing them that their vote has been counted
             await ctx.send(

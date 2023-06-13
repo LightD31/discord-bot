@@ -69,14 +69,15 @@ async def embed_song(
     icon="https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Spotify_logo_without_text.svg/200px-Spotify_logo_without_text.svg.png",
 ):
     """
-    Generates an embed message for a given song, with the specified type and timestamp.
+    Creates an embed message for a Discord bot that displays information about a song.
 
     Args:
-        song (dict): A dictionary containing information about the song.
-        type (Type): The type of the message to generate (ADD, DELETE, VOTE, or VOTE_RESULT).
-        time (datetime): The timestamp to display in the message.
-        person (str, optional): The name of the person who added the song. Defaults to None.
-        icon (str, optional): The URL of the icon to display in the message. Defaults to the Spotify logo.
+        song (dict): A dictionary containing information about the song, including the person who added it.
+        track (dict): A dictionary containing information about the track, including its name, artist, and album.
+        type (Type): An enum value indicating the type of message to display.
+        time (datetime): A datetime object indicating the time the message was created.
+        person (str, optional): The person who added the song. Defaults to None.
+        icon (str, optional): The URL of the icon to use in the footer. Defaults to the Spotify logo.
 
     Returns:
         interactions.Embed: An embed message containing information about the song.
@@ -129,6 +130,12 @@ async def embed_song(
             value=f"Initialement ajoutée par <@{person}>{' (ou pas)' if person == '108967780224614400' else ''}",
             inline=False,
         )
+    if type == Type.VOTE:
+        embed.add_field(
+            name="Votes",
+            value=f"0 votes",
+            inline=False,
+        )
     if type == Type.ADD or type == Type.DELETE:
         embed.add_field(
             name="\u200b",
@@ -148,8 +155,8 @@ async def embed_song(
     return embed
 
 
-async def embed_message_vote(keep=0, remove=0, menfou=0):
-    embed = interactions.Embed(color=interactions.MaterialColors.ORANGE)
+async def embed_message_vote(keep=0, remove=0, menfou=0, color=interactions.MaterialColors.ORANGE):
+    embed = interactions.Embed(color=color)
     embed.add_field(
         name="Conserver",
         value=f"{keep} vote{'s' if keep > 1 else ''}",
