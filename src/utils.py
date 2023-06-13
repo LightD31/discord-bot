@@ -14,6 +14,7 @@ load_dotenv()
 
 
 def milliseconds_to_string(duration_ms):
+    duration_ms = int(duration_ms)
     seconds = duration_ms / 1000
     days = seconds // 86400
     seconds %= 86400

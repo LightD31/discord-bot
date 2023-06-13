@@ -2,9 +2,54 @@ import os
 from datetime import datetime
 from dict import spotify2id, spotify2name
 from enum import Enum
+import spotipy
+from src import logutil
 
 import interactions
 from dict import spotify2id
+
+logger = logutil.init_logger(os.path.basename(__file__))
+
+
+def spotify_auth():
+    # Create a SpotifyOAuth object to handle authentication
+    sp_oauth = spotipy.SpotifyOAuth(
+        client_id=os.environ.get("SPOTIFY_CLIENT_ID"),
+        redirect_uri=os.environ.get("SPOTIFY_REDIRECT_URI"),
+        client_secret=os.environ.get("SPOTIFY_CLIENT_SECRET"),
+        scope="playlist-modify-private playlist-read-private",
+        open_browser=False,
+        cache_handler=spotipy.CacheFileHandler("./.cache"),
+    )
+
+    # Check if a valid token is already cached
+    token_info = sp_oauth.get_cached_token()
+
+    # If the token is invalid or doesn't exist, prompt the user to authenticate
+    if (
+        not token_info
+        or sp_oauth.is_token_expired(token_info)
+        or not sp_oauth.validate_token(token_info)
+    ):
+        if token_info:
+            logger.warn("Cached token has expired or is invalid.")
+        # Generate the authorization URL and prompt the user to visit it
+        auth_url = sp_oauth.get_authorize_url()
+        logger.warn(f"Please visit this URL to authorize the application: {auth_url}")
+        print("Please visit this URL to authorize the application: {}".format(auth_url))
+
+        # Wait for the user to input the response URL after authenticating
+        auth_code = input("Enter the response URL: ")
+
+        # Exchange the authorization code for an access token and refresh token
+        token_info = sp_oauth.get_access_token(
+            sp_oauth.parse_response_code(auth_code), as_dict=False
+        )
+
+    # Create a new instance of the Spotify API with the access token
+    sp = spotipy.Spotify(auth_manager=sp_oauth, language="fr")
+
+    return sp
 
 
 class Type(Enum):
@@ -17,6 +62,7 @@ class Type(Enum):
 
 async def embed_song(
     song,
+    track,
     type: Type,
     time,
     person=None,
@@ -46,45 +92,51 @@ async def embed_song(
         footer = ""
         color = interactions.MaterialColors.RED
     elif type == Type.VOTE:
-        title = f"Vote ouvert jusqu'à {time}"
+        title = f"Vote ouvert jusqu'à {str(interactions.utils.timestamp_converter(time).format(interactions.TimestampStyles.RelativeTime))}"
         color = interactions.MaterialColors.ORANGE
         footer = "Nettoyeur de playlist"
     elif type == Type.VOTE_WIN:
         title = f"Résultat du vote"
         color = interactions.MaterialColors.LIME
+        footer = ""
     elif type == Type.VOTE_LOSE:
         title = f"Résultat du vote"
         color = interactions.MaterialColors.DEEP_ORANGE
+        footer = ""
     else:
         raise ValueError("Invalid type")
     embed = interactions.Embed(title=title, color=color)
-    embed.set_thumbnail(url=song["image_url"])
+    embed.set_thumbnail(url=track["album"]["images"][0]["url"])
     embed.add_field(
         name="Titre",
-        value=f"[{song['name']}]({song['song_url']})\n([Preview]({song['preview_url']}))",
+        value=f"[{track['name']}]({track['external_urls']['spotify']})\n([Preview]({track['preview_url']}))",
         inline=True,
     )
-    embed.add_field(name="Artiste", value=song["artists"], inline=True)
+    embed.add_field(
+        name="Artiste",
+        value=", ".join(artist["name"] for artist in track["artists"]),
+        inline=True,
+    )
 
     embed.add_field(
         name="Album",
-        value=f"[{song['album']}]({song['album_url']})",
+        value=f"[{track['album']['name']}]({track['album']['external_urls']['spotify']})",
         inline=True,
     )
     if type != Type.ADD:
         embed.add_field(
-            name=" ",
-            value=f"Initialement ajoutée par <@{person}> (ou pas)",
+            name="\u200b",
+            value=f"Initialement ajoutée par <@{person}>{' (ou pas)' if person == '108967780224614400' else ''}",
             inline=False,
         )
     if type == Type.ADD or type == Type.DELETE:
         embed.add_field(
-            name=" ",
+            name="\u200b",
             value="[Ecouter la playlist](https://link.drndvs.fr/LaPlaylistDeLaGuilde)",
             inline=False,
         )
         embed.add_field(
-            name=" ",
+            name="\u200b",
             value="[Ecouter les récents](https://link.drndvs.fr/LesDecouvertesDeLaGuilde)",
             inline=True,
         )
@@ -121,24 +173,6 @@ async def embed_message_vote(keep=0, remove=0, menfou=0):
     return embed
 
 
-def read_votes(votesfile):
-    """Reads the votes from the votes file and returns a dictionary"""
-    votes = {}
-    if os.path.exists(votesfile):
-        with open(votesfile, "r") as f:
-            for line in f:
-                user_id, vote = line.strip().split(":")
-                votes[user_id] = vote
-    return votes
-
-
-def write_votes(votes, votesfile):
-    """Writes the votes to the votes file"""
-    with open(votesfile, "w") as f:
-        for user_id, vote in votes.items():
-            f.write(f"{user_id}:{vote}\n")
-
-
 def count_votes(votes):
     """Counts the votes and returns a dictionary with the vote counts"""
     vote_counts = {}
@@ -150,36 +184,21 @@ def count_votes(votes):
     return vote_counts
 
 
-def spotifymongoformat(track, user=None):
+def spotifymongoformat(track, user: interactions.User = None):
     if user:
         song = {
             "_id": track["id"],
-            "name": track["name"],
-            "artists": ", ".join(artist["name"] for artist in track["artists"]),
-            "album": track["album"]["name"],
-            "added_by": user,
+            "added_by": user.id,
             "added_at": interactions.Timestamp.utcnow(),
-            "image_url": track["album"]["images"][0]["url"],
-            "preview_url": track["preview_url"],
             "duration_ms": track["duration_ms"],
-            "song_url": track["external_urls"]["spotify"],
-            "album_url": track["album"]["external_urls"]["spotify"],
         }
     else:
         song = {
             "_id": track["track"]["id"],
-            "name": track["track"]["name"],
-            "artists": ", ".join(
-                artist["name"] for artist in track["track"]["artists"]
+            "added_by": spotify2id.get(
+                track["added_by"]["id"], track["added_by"]["id"]
             ),
-            "album": track["track"]["album"]["name"],
-            "added_by": spotify2id.get(track["added_by"]["id"], "Inconnu"),
             "added_at": track["added_at"],
-            "image_url": track["track"]["album"]["images"][0]["url"],
-            "preview_url": track["track"]["preview_url"],
             "duration_ms": track["track"]["duration_ms"],
-            "song_url": track["track"]["external_urls"]["spotify"],
-            "album_url": track["track"]["album"]["external_urls"]["spotify"],
-            "avatar_url": track["avatar_url"],
         }
     return song
