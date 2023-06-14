@@ -2,6 +2,7 @@ import io
 import os
 import random
 from datetime import datetime
+import time
 
 import interactions
 import pymongo
@@ -27,6 +28,7 @@ LOG_CHANNEL_ID = os.environ.get("LOG_CHANNEL_ID")
 GUILDE_GUILD_ID = int(os.environ.get("GUILDE_GUILD_ID"))
 DEV_GUILD = int(os.environ.get("DEV_GUILD"))
 MONGO_SERV = os.environ.get("MONGO_SERV")
+COOLDOWN_TIME = 5
 
 votes_doc = "votes"
 vote_infos_doc = "vote_infos"
@@ -43,6 +45,7 @@ playlistItemsFull = db["playlistItemsFull"]
 
 
 sp = spotify_auth()
+last_votes = {}
 
 
 class Spotify(interactions.Extension):
@@ -147,7 +150,7 @@ class Spotify(interactions.Extension):
                 ]
         await ctx.send(choices=choices)
 
-    @interactions.Task.create(interactions.TimeTrigger(hour=13, minute=00, utc=False))
+    @interactions.Task.create(interactions.TimeTrigger(hour=13, minute=40, utc=False))
     async def randomvote(self):
         logger.info("Tache randomvote lancée")
         vote_info = playlistItemsFull.find_one(
@@ -178,13 +181,16 @@ class Spotify(interactions.Extension):
                 content="La chanson a été supprimée.",
                 embeds=[
                     await embed_song(
-                        song, Type.VOTE_LOSE, interactions.Timestamp.now()
+                        song=song,
+                        track=track,
+                        type=Type.VOTE_LOSE,
+                        time=interactions.Timestamp.now(),
                     ),
                     await embed_message_vote(
                         keep=conserver,
                         remove=supprimer,
                         menfou=menfou,
-                         color = interactions.MaterialColors.DEEP_ORANGE,
+                        color=interactions.MaterialColors.DEEP_ORANGE,
                     ),
                 ],
                 components=[],
@@ -203,7 +209,12 @@ class Spotify(interactions.Extension):
                         type=Type.VOTE_WIN,
                         time=interactions.Timestamp.utcnow(),
                     ),
-                    await embed_message_vote(keep=conserver, remove=supprimer,mefou=menfou, color = interactions.MaterialColors.LIME),
+                    await embed_message_vote(
+                        keep=conserver,
+                        remove=supprimer,
+                        mefou=menfou,
+                        color=interactions.MaterialColors.LIME,
+                    ),
                 ],
                 components=[],
             )
@@ -272,6 +283,13 @@ class Spotify(interactions.Extension):
     async def on_component(self, event: interactions.api.events.Component):
         """Called when a component is clicked"""
         ctx = event.ctx
+        # Check if the user has voted recently
+        user_id = str(ctx.user.id)
+        if user_id in last_votes and time.time() - last_votes[user_id] < COOLDOWN_TIME:
+            await ctx.send("Tu ne peux voter que toutes les 5 secondes ⚠️", ephemeral=True)
+            logger.warning(f"{ctx.user.username} a essayé de voter trop rapidement")
+            return
+        last_votes[user_id] = time.time()
         vote_infos = playlistItemsFull.find_one(
             {"_id": vote_infos_doc}, {"message_id": 1, "track_id": 1}
         )
@@ -294,8 +312,10 @@ class Spotify(interactions.Extension):
             remove = vote_counts.get("supprimer", 0)
             menfou = vote_counts.get("menfou", 0)
 
-            logger.info(f"Votes : {keep} conserver, {remove} supprimer, {menfou} menfou")
-            embed_original.fields[4].value=f"{keep+remove+menfou} votes"
+            logger.info(
+                f"Votes : {keep} conserver, {remove} supprimer, {menfou} menfou"
+            )
+            embed_original.fields[4].value = f"{keep+remove+menfou} votes"
             # await ctx.message.edit(content=f"Voulez-vous conserver cette chanson dans playlist ?")
             # Update the message with the vote counts
 
@@ -303,10 +323,8 @@ class Spotify(interactions.Extension):
                 embeds=[
                     embed_original,
                     # await embed_message_vote(keep, remove, menfou),
-
                 ]
             )
-
 
             # Send a message to the user informing them that their vote has been counted
             await ctx.send(
@@ -403,7 +421,7 @@ class Spotify(interactions.Extension):
                 )
                 for track_id in removed_track_ids:
                     song = playlistItemsFull.find_one_and_delete({"_id": track_id})
-                    track = sp.track(song["_id"], market="FR")
+                    track = sp.track(track_id, market="FR")
                     embed = await embed_song(
                         song=song,
                         track=track,
