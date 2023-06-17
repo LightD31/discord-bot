@@ -115,7 +115,7 @@ async def embed_song(
     )
     embed.add_field(
         name="Artiste",
-        value=", ".join(artist["name"] for artist in track["artists"]),
+        value = ", ".join(f"[{artist['name']}]({artist['external_urls']['spotify']})" for artist in track["artists"]),
         inline=True,
     )
 
@@ -197,7 +197,11 @@ def spotifymongoformat(track, user: interactions.User = None):
             "_id": track["id"],
             "added_by": user.id,
             "added_at": interactions.Timestamp.utcnow(),
-            "duration_ms": track["duration_ms"],
+            "duration_ms": track.get("duration_ms", None),
+            "name": track.get("name", None),
+            "artists": [artist.get('name') for artist in track.get("artists", None)],
+            "album": track["album"]['name'],
+
         }
     else:
         song = {
@@ -207,5 +211,8 @@ def spotifymongoformat(track, user: interactions.User = None):
             ),
             "added_at": track["added_at"],
             "duration_ms": track["track"]["duration_ms"],
+            "name": track["track"]["name"],
+            "artists": [artist["name"] for artist in track["track"]["artists"]],
+            "album": track["track"]["album"]['name'],
         }
     return song

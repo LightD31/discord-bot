@@ -30,7 +30,6 @@ DEV_GUILD = int(os.environ.get("DEV_GUILD"))
 MONGO_SERV = os.environ.get("MONGO_SERV")
 COOLDOWN_TIME = 5
 
-votes_doc = "votes"
 vote_infos_doc = "vote_infos"
 pollhistory_doc = "pollhistory"
 snapshot_doc = "snapshot"
@@ -42,6 +41,7 @@ logger = logutil.init_logger(os.path.basename(__file__))
 client = pymongo.MongoClient(MONGO_SERV)
 db = client["Playlist"]
 playlistItemsFull = db["playlistItemsFull"]
+votesDB = db["votes"]
 
 
 sp = spotify_auth()
@@ -150,7 +150,7 @@ class Spotify(interactions.Extension):
                 ]
         await ctx.send(choices=choices)
 
-    @interactions.Task.create(interactions.TimeTrigger(hour=13, minute=40, utc=False))
+    @interactions.Task.create(interactions.TimeTrigger(hour=13, minute=00, utc=False))
     async def randomvote(self):
         logger.info("Tache randomvote lancée")
         vote_info = playlistItemsFull.find_one(
@@ -163,10 +163,8 @@ class Spotify(interactions.Extension):
         channel = self.bot.get_channel(CHANNEL_ID)
         message = await channel.fetch_message(message_id)
         logger.debug(f"message : {str(message.id)}")
-        votes = playlistItemsFull.find_one(
-            {"_id": votes_doc, track_id: {"$exists": True}}, {track_id: 1}
-        ).get(track_id, {})
-        vote_counts = count_votes(votes)
+        votes = votesDB.find_one({"_id": track_id})
+        vote_counts = count_votes(votes["votes"])
         conserver = vote_counts.get("conserver", 0)
         supprimer = vote_counts.get("supprimer", 0)
         menfou = vote_counts.get("menfou", 0)
@@ -197,6 +195,9 @@ class Spotify(interactions.Extension):
             )
             sp.playlist_remove_all_occurrences_of_items(PLAYLIST_ID, [track_id])
             playlistItemsFull.delete_one({"_id": track_id})
+            votesDB.find_one_and_update(
+                {"_id": track_id}, {"$set": {"state": "supprimée"}}
+            )
             logger.info("La chanson a été supprimée.")
             await Spotify.check_playlist_changes()
         else:
@@ -212,11 +213,14 @@ class Spotify(interactions.Extension):
                     await embed_message_vote(
                         keep=conserver,
                         remove=supprimer,
-                        mefou=menfou,
+                        menfou=menfou,
                         color=interactions.MaterialColors.LIME,
                     ),
                 ],
                 components=[],
+            )
+            votesDB.find_one_and_update(
+                {"_id": track_id}, {"$set": {"state": "conservée"}}
             )
             logger.info("La chanson a été conservée.")
         track_ids = set(playlistItemsFull.find_one({"_id": track_ids_doc})["track_ids"])
@@ -278,6 +282,15 @@ class Spotify(interactions.Extension):
         playlistItemsFull.update_one(
             {"_id": pollhistory_doc}, {"$push": {"pollhistory": track_id}}
         )
+        votesDB.update_one(
+            {"_id": track_id},
+            {
+                "$set": {
+                    "name": f"{', '.join(artist['name'] for artist in track['artists'])} - {track['name']}",
+                    "date": datetime.now().strftime("%d/%m/%Y"),
+                }
+            }, upsert=True
+        )
 
     @interactions.listen()
     async def on_component(self, event: interactions.api.events.Component):
@@ -286,7 +299,9 @@ class Spotify(interactions.Extension):
         # Check if the user has voted recently
         user_id = str(ctx.user.id)
         if user_id in last_votes and time.time() - last_votes[user_id] < COOLDOWN_TIME:
-            await ctx.send("Tu ne peux voter que toutes les 5 secondes ⚠️", ephemeral=True)
+            await ctx.send(
+                "Tu ne peux voter que toutes les 5 secondes ⚠️", ephemeral=True
+            )
             logger.warning(f"{ctx.user.username} a essayé de voter trop rapidement")
             return
         last_votes[user_id] = time.time()
@@ -299,15 +314,15 @@ class Spotify(interactions.Extension):
             embed_original = ctx.message.embeds[0]
             # Check if the user has already voted and update their vote if necessary
             user_id = str(ctx.user.id)
-            votes = playlistItemsFull.find_one_and_update(
-                {"_id": votes_doc},
-                {"$set": {f"{track_id}.{user_id}": ctx.custom_id}},
+            votes = votesDB.find_one_and_update(
+                {"_id": track_id},
+                {"$set": {f"votes.{user_id}": ctx.custom_id}},
                 upsert=True,
                 return_document=pymongo.ReturnDocument.AFTER,
             )
             logger.info(f"User {ctx.user.username} voted {ctx.custom_id}")
             # Count the votes
-            vote_counts = count_votes(votes.get(track_id, {}))
+            vote_counts = count_votes(votes["votes"])
             keep = vote_counts.get("conserver", 0)
             remove = vote_counts.get("supprimer", 0)
             menfou = vote_counts.get("menfou", 0)
@@ -476,57 +491,16 @@ class Spotify(interactions.Extension):
         while results["next"]:
             results = sp.next(results)
             tracks.extend(results["items"])
-        cache = {}
         # Insert tracks into MongoDB collection
-        mongotracks = []
         track_ids = []
         for track in tracks:
-            mongotracks.append(spotifymongoformat(track))
+            playlistItemsFull.update_one(
+                {"_id": track["track"]["id"]},
+                {"$set": spotifymongoformat(track)},
+                upsert=True,
+            )
             track_ids.append(track["track"]["id"])  # Append track ID to list
-        playlistItemsFull.insert_many(mongotracks)
         playlistItemsFull.update_one(
             {"_id": track_ids_doc}, {"$set": {"track_ids": track_ids}}, upsert=True
         )
-        with open("data/pollhistory.txt", "r") as f:
-            pollhistory = set(f.read().splitlines())
-            playlistItemsFull.update_one(
-                {"_id": pollhistory_doc},
-                {"$set": {"pollhistory": list(pollhistory)}},
-                upsert=True,
-            )
-        with open("data/votesinfo.txt", "r") as f:
-            message_id = f.readline().strip()
-            track_id = f.readline().strip()
-            playlistItemsFull.update_one(
-                {"_id": vote_infos_doc},
-                {"$set": {"message_id": message_id, "track_id": track_id}},
-                upsert=True,
-            )
-        with open("data/votes.txt", "r") as f:
-            votes = {}
-            if os.path.exists("data/votes.txt"):
-                with open("data/votes.txt", "r") as f:
-                    for line in f:
-                        user_id, vote = line.strip().split(":")
-                        votes[user_id] = vote
-                        playlistItemsFull.update_one(
-                            {"_id": votes_doc},
-                            {"$set": {f"{track_id}.{user_id}": vote}},
-                            upsert=True,
-                        )
-        with open("data/snapshot.txt", "r") as f:
-            snapshot = f.readline().strip()
-            duration = int(f.readline().strip())
-            length = int(f.readline().strip())
-            playlistItemsFull.update_one(
-                {"_id": snapshot_doc},
-                {
-                    "$set": {
-                        "snapshot": snapshot,
-                        "duration": duration,
-                        "length": length,
-                    }
-                },
-                upsert=True,
-            )
         await ctx.send("Playlist initialisée")

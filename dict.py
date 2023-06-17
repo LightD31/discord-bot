@@ -66,6 +66,7 @@ spotify2id = {
     "21lh7dlg3r3sqj7qo2lk47xhi": "218302776491376641",
     "ywm6kti1t4vhhsxwmfda3h39q": "168762244182573057",
     "11135978441": "149237199324315648",
+    "21y3upitkuc2cbexd2ew2kvly": "Noemie"
 }
 discord2name = {
     "108967780224614400": "Tom",
@@ -77,4 +78,5 @@ discord2name = {
     "218302776491376641": "Louyette",
     "168762244182573057": "Loïc",
     "149237199324315648": "Hermann",
+    "Noemie": "Noémie",
 }
