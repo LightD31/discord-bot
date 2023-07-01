@@ -39,6 +39,7 @@ class Utils(interactions.Extension):
     )
     @interactions.slash_default_member_permission(
         interactions.Permissions.ADMINISTRATOR
+        | interactions.Permissions.MANAGE_MESSAGES
     )
     async def delete(
         self,

@@ -23,12 +23,7 @@ finishList = [
     "c'est fait",
     "c'est ajouté",
     "super, tu as ajouté une nouvelle chanson",
-    "bravo, la playlist est encore meilleure maintenant",
-    "tu as du goût, cette chanson est top",
-    "excellent choix, cette chanson est géniale",
-    "tu es un vrai mélomane, merci pour cette chanson",
-    "tu as ajouté une chanson de plus, c'est parfait",
-    "la playlist est de plus en plus cool, merci pour cette chanson",
+    "excellent choix",
 ]
 activityList = [
     "Petite cuillère",
@@ -78,5 +73,7 @@ discord2name = {
     "218302776491376641": "Louyette",
     "168762244182573057": "Loïc",
     "149237199324315648": "Hermann",
+    "136922909192093696":"Malé",
+    "114612393140682754": "Axel",
     "Noemie": "Noémie",
 }

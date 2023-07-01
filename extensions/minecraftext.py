@@ -13,34 +13,38 @@ from src import logutil
 from src.minecraft import get_player_stats, get_users
 from src.utils import create_dynamic_image
 
+# Import necessary libraries and modules
 logger = logutil.init_logger(os.path.basename(__file__))
-
 load_dotenv()
 
-MINECRAFT_SERV_MESSAGE_URL = os.environ.get("MINECRAFT_SERV_MESSAGE_URL")
-MINECRAFT_SERV_MESSAGE_URL_NEW = os.environ.get("MINECRAFT_SERV_MESSAGE_URL_NEW")
+# Get environment variables
 MINECRAFT_ADDRESS = os.environ.get("MINECRAFT_ADDRESS")
 CHANNEL_ID_KUBZ = int(os.environ.get("CHANNEL_ID_KUBZ"))
 MESSAGE_ID_KUBZ = int(os.environ.get("MESSAGE_ID_KUBZ"))
 SFTPS_PASSWORD = os.environ.get("SFTPS_PASSWORD")
 
-
+# Define Minecraft extension class
 class Minecraft(interactions.Extension):
     def __init__(self, client):
         self.client = client
         self.image_cache = {}
 
+
+    # Start the status and stats tasks on bot startup
     @interactions.listen()
     async def on_startup(self):
         self.status.start()
         self.stats.start()
-        await self.status()
-        await self.stats()
 
+    # Define Minecraft server object
     serverColoc = JavaServer(MINECRAFT_ADDRESS, 25565)
 
+    # Define status task to update Minecraft server status every 30 seconds
     @interactions.Task.create(interactions.IntervalTrigger(seconds=30))
     async def status(self, serverColoc=serverColoc):
+        """
+        Update the Minecraft server status and edit the status message in the designated Discord channel.
+        """
         logger.debug("Updating Minecraft server status")
         channel = await self.bot.fetch_channel(CHANNEL_ID_KUBZ)
         message = await channel.fetch_message(MESSAGE_ID_KUBZ)
@@ -53,7 +57,10 @@ class Minecraft(interactions.Extension):
             timestamp=embed2Timestamp,
         )
         try:
+            # Get Minecraft server status
             colocStatus = serverColoc.status()
+
+            # If there are players online, get their names and display them in the status message
             if colocStatus.players.online > 0:
                 players = "\n".join(
                     sorted([player.name for player in colocStatus.players.sample], key=str.lower)
@@ -63,8 +70,9 @@ class Minecraft(interactions.Extension):
                 players = "\u200b"
                 joueurs = "\u200b"
 
+            # Create and format the status message
             embed1 = interactions.Embed()
-            embed1.description = f"Adresse : `http://{MINECRAFT_ADDRESS}:25565`\nCarte : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124 'Dynmap')\nStats : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124/stats/index.html 'Stats')"
+            embed1.description = f"Adresse : `http://{MINECRAFT_ADDRESS}:25565`\nCarte 2D : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8124 'Pl3xMap')\nCarte 3D : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8101 'BlueMap')\nStats : [Cliquez ici](http://{MINECRAFT_ADDRESS}:8101/stats/index.html 'Stats')"
             embed1.add_fields(
                 interactions.EmbedField(
                     "Latence", "{:.2f} ms".format(colocStatus.latency), True
@@ -81,8 +89,11 @@ class Minecraft(interactions.Extension):
             embed1.set_footer("Serveur Minecraft du believe")
             embed1.timestamp = interactions.Timestamp.utcnow().isoformat()
             embed1.color = 0x00AA00
+
+            # Edit the status message in the designated Discord channel
             await message.edit(content="", embeds=[embed1, embed2])
 
+        # If the Minecraft server is offline, display an error message in the status message
         except (ConnectionResetError, ConnectionRefusedError) as e:
             embed1 = interactions.Embed(
                 title="Serveur Hors-ligne",
@@ -100,12 +111,14 @@ class Minecraft(interactions.Extension):
             )
             await message.edit(content="", embeds=[embed1, embed2])
 
-    @interactions.Task.create(interactions.IntervalTrigger(minutes=5))
+    @interactions.Task.create(interactions.IntervalTrigger(minutes=5, seconds=10))
     async def stats(self):
         logger.debug("Updating Minecraft server stats")
         channel = await self.bot.fetch_channel(CHANNEL_ID_KUBZ)
         message = await channel.fetch_message(MESSAGE_ID_KUBZ)
         embed1 = message.embeds[0]
+        
+        # Connect to the Minecraft server using SSH and SFTP
         async with asyncssh.connect(
             host="192.168.1.13",
             port=2224,
@@ -121,6 +134,8 @@ class Minecraft(interactions.Extension):
                     logger.debug(f"Opening {file}")
                     tasks.append(get_player_stats(sftp, file))
                 results = await asyncio.gather(*tasks)
+        
+        # Convert the player stats to a pandas dataframe and format it
         users_dict = results[0]
         uuid_to_name_dict = {item["uuid"]: item["name"] for item in users_dict}
         df = pd.DataFrame(results[1:])
@@ -130,6 +145,7 @@ class Minecraft(interactions.Extension):
         )
         df.sort_values(by="Temps de jeu", ascending=False, inplace=True)
 
+        # Convert the dataframe to a prettytable and create an image of it
         output = StringIO()
         df.to_csv(output, index=False, float_format="%.2f")
         output.seek(0)
@@ -140,6 +156,7 @@ class Minecraft(interactions.Extension):
         table.set_style(prettytable.SINGLE_BORDER)
         table.padding_width = 1
 
+        # Create an embed with the server stats and send it to the Discord channel
         embed2 = interactions.Embed(
             title="Stats",
             description=f"Actualisé toutes les 5 minutes\nDernière actualisation : {interactions.Timestamp.utcnow().format(interactions.TimestampStyles.RelativeTime)}",

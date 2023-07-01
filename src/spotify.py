@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from dict import spotify2id, spotify2name
+from dict import spotify2id, discord2name
 from enum import Enum
 import spotipy
 from src import logutil
@@ -181,14 +181,28 @@ async def embed_message_vote(keep=0, remove=0, menfou=0, color=interactions.Mate
 
 
 def count_votes(votes):
-    """Counts the votes and returns a dictionary with the vote counts"""
+    """
+    Counts the votes and returns a dictionary with the vote counts.
+
+    Args:
+    - votes (dict): A dictionary containing the votes.
+
+    Returns:
+    - A tuple containing the number of "conserver" votes, "supprimer" votes, and "menfou" votes, respectively.
+    """
     vote_counts = {}
+    users = []
     for vote in votes.values():
         if vote in vote_counts:
             vote_counts[vote] += 1
         else:
             vote_counts[vote] = 1
-    return vote_counts
+    for user in votes.keys():
+        users.append(discord2name.get(user))
+    conserver = vote_counts.get("conserver", 0)
+    supprimer = vote_counts.get("supprimer", 0)
+    menfou = vote_counts.get("menfou", 0)
+    return conserver, supprimer, menfou, users
 
 
 def spotifymongoformat(track, user: interactions.User = None):
