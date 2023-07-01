@@ -49,6 +49,10 @@ sp = spotify_auth()
 last_votes = {}
 # Keep track of reminders
 reminders = {}
+#keep track of vote infos
+vote_infos = {}
+#keep track of snapshot
+snapshot = {}
 
 
 class Spotify(interactions.Extension):
@@ -65,6 +69,7 @@ class Spotify(interactions.Extension):
     async def on_ready(self):
         await self.load_reminders()
         self.reminder_check.start()
+        await self.load_voteinfos()
 
     @interactions.slash_command(
         "addsong",
@@ -488,6 +493,7 @@ class Spotify(interactions.Extension):
     )
     async def setreminder(self, ctx: interactions.SlashContext, heure, minute):
         if ctx.channel_id == CHANNEL_ID:
+            logger.info(f"{ctx.user.display_name} a ajouté un rappel à {heure}:{minute}")
             remind_time = datetime.strptime(f"{heure}:{minute}", "%H:%M")
             current_time = datetime.now()
             remind_time = current_time.replace(
@@ -495,13 +501,13 @@ class Spotify(interactions.Extension):
             )
             if remind_time <= current_time:
                 remind_time += timedelta(days=1)
-            reminders[remind_time] = ctx.author.id  # Store the user ID in the dictionary
+            reminders[remind_time] = ctx.user.id  # Store the user ID in the dictionary
             await self.save_reminders()
 
-            await ctx.send(f"Daily reminder set for {remind_time.strftime('%H:%M')}.")
+            await ctx.send(f"Rappel défini à {remind_time.strftime('%H:%M')}.", ephemeral=True)
         else:
             await ctx.send("Cette commande n'est pas disponible dans ce salon.", ephemeral=True)
-            logger.info(f"Commande /rappel utilisée dans le salon #{ctx.channel.name} ({ctx.channel_id})")
+            logger.info(f"{ctx.user.display_name} a essayé d'utiliser la commande /rappel dans le salon #{ctx.channel.name} ({ctx.channel_id})")
 
     async def load_reminders(self):
         try:
@@ -514,7 +520,20 @@ class Spotify(interactions.Extension):
                     reminders[remind_time] = user_id
         except FileNotFoundError:
             pass
+    async def load_voteinfos(self):
+        with open("data/voteinfos.json", "r") as f:
+            vote_infos.update(json.load(f))
+    async def load_snapshot(self):
+        with open("data/snapshot.json", "r") as f:
+            snapshot.update(json.load(f))
+    async def save_snapshot(self):
+        with open("data/snapshot.json", "w") as f:
+            json.dump(snapshot, f)
+    async def save_voteinfos(self):
+        with open("data/voteinfos.json", "w") as f:
+            json.dump(vote_infos, f)
 
+                
     async def save_reminders(self):
         reminders_data = {
             remind_time.strftime("%Y-%m-%d %H:%M:%S"): user_id
@@ -529,12 +548,14 @@ class Spotify(interactions.Extension):
         reminders_to_remove = []
         for remind_time, user_id in reminders.copy().items():
             if current_time >= remind_time:
-                user = self.bot.get_user(user_id)
+                user = await self.bot.fetch_user(user_id)
                 if user:
                     try:
-                        votesDB.find_one({"_id": user_id})
+                        votesDB.find_one({"_id": vote_infos["track_id"]})["votes"][str(user_id)]
+                        logger.debug(f"{user.display_name} a déjà voté aujourd'hui !, pas de rappel envoyé")
                     except KeyError:
                         await user.send(f"Tu n'as pas voté aujourd'hui !")
+                        logger.debug(f"Rappel envoyé à {user.display_name}")
                 next_remind_time = remind_time + timedelta(days=1)
                 reminders_to_remove.append(remind_time)
                 reminders[next_remind_time] = user_id
@@ -560,7 +581,7 @@ class Spotify(interactions.Extension):
                 del reminders[remind_time]
 
             await self.save_reminders()
-            await ctx.send("Tous les rappels ont été supprimés !")
+            await ctx.send("Tous les rappels ont été supprimés !", ephemeral=True)
         else:
             await ctx.send("Cette commande n'est pas disponible dans ce salon.", ephemeral=True)
             logger.info(f"Commande /supprimerrappels utilisée dans le salon #{ctx.channel.name} ({ctx.channel_id})")

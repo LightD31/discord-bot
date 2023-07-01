@@ -31,8 +31,8 @@ if not os.environ.get("TOKEN"):
 
 client = interactions.Client(
     token=os.environ.get("TOKEN"),
-    debug_scope=DEV_GUILD,
     intents=interactions.Intents.ALL,
+    send_not_ready_messages=True,
 )
 
 
