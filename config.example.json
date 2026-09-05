@@ -336,6 +336,7 @@
                 "zeventGoalsCount": 5,
                 "zeventShowOfflineStreamers": true,
                 "zeventPlanningCount": 6,
+                "zeventTopDonationsCount": 5,
                 "zeventGoalsVelocityWeight": 2.0,
                 "zeventMilestoneInterval": 100000
             },
