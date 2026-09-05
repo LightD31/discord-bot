@@ -12,6 +12,7 @@ import pytest
 
 from extensions.zevent import embeds as module
 from extensions.zevent._common import StreamerInfo
+from extensions.zevent.api import ApiMixin
 from extensions.zevent.embeds import (
     SOURCE_STATS,
     SOURCE_STREAMLABS,
@@ -23,8 +24,12 @@ from extensions.zevent.embeds import (
 from features.zevent.models import DonationGoal, Participant, Show
 
 
-class _Embeds(EmbedsMixin):
-    """EmbedsMixin with the two phase predicates its builders consult."""
+class _Embeds(EmbedsMixin, ApiMixin):
+    """EmbedsMixin with the two phase predicates its builders consult.
+
+    ``ApiMixin`` only comes along for ``_safe_get_data``, which the
+    top-donations builder reads the zevent.fr payload through.
+    """
 
     _event_title = "ZEvent test"
 
@@ -155,3 +160,51 @@ def test_fewer_shows_than_configured_renders_them_all(monkeypatch) -> None:
     embed = _Embeds().create_planning_embed(_shows(2))
     assert embed is not None
     assert len(embed.fields) == 2
+
+
+# ─── Top donations count ──────────────────────────────────────────────
+
+
+def _streams(count: int) -> list[dict]:
+    """zevent.fr ``live`` entries, richest first once sorted."""
+    return [
+        {
+            "display": f"Streamer {i}",
+            "twitch": f"streamer{i}",
+            "donationAmount": {"number": 1000.0 - i, "formatted": f"{1000 - i} €"},
+        }
+        for i in range(count)
+    ]
+
+
+def test_the_top_donations_lists_as_many_streamers_as_configured(monkeypatch) -> None:
+    monkeypatch.setattr(module, "TOP_DONATIONS_COUNT", 3)
+    embed = _Embeds().create_top_donations_embed(_streams(10))
+    assert embed is not None
+    assert len(embed.fields[0].value.splitlines()) == 3
+
+
+def test_the_top_donations_embed_is_dropped_when_the_count_is_zero(monkeypatch) -> None:
+    """Zero hides it entirely rather than rendering an empty embed."""
+    monkeypatch.setattr(module, "TOP_DONATIONS_COUNT", 0)
+    assert _Embeds().create_top_donations_embed(_streams(10)) is None
+
+
+def test_fewer_donating_streamers_than_configured_renders_them_all(monkeypatch) -> None:
+    monkeypatch.setattr(module, "TOP_DONATIONS_COUNT", 10)
+    embed = _Embeds().create_top_donations_embed(_streams(2))
+    assert embed is not None
+    assert len(embed.fields[0].value.splitlines()) == 2
+
+
+def test_a_generous_top_donations_count_stays_within_the_field_limit(monkeypatch) -> None:
+    """Entries are dropped whole rather than letting Discord reject the field."""
+    monkeypatch.setattr(module, "TOP_DONATIONS_COUNT", 25)
+    streams = _streams(25)
+    for stream in streams:
+        stream["display"] = stream["display"] + " " + "x" * 80
+    embed = _Embeds().create_top_donations_embed(streams)
+    assert embed is not None
+    value = embed.fields[0].value
+    assert len(value) <= 1024
+    assert len(value.splitlines()) < 25

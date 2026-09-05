@@ -9,6 +9,7 @@ from features.zevent.stats import (
     DEFAULT_OFFLINE_FACTOR,
     DEFAULT_PLANNING_COUNT,
     DEFAULT_PROGRESS_WEIGHT,
+    DEFAULT_TOP_DONATIONS_COUNT,
     DEFAULT_VELOCITY_WEIGHT,
 )
 from src.core import logging as logutil
@@ -220,6 +221,16 @@ class ZeventConfig(SchemaBase):
             "Discord, un nombre élevé peut être réduit à l'affichage."
         ),
     )
+    zeventTopDonationsCount: int = ui(
+        "Nombre de streamers dans le top donations",
+        "number",
+        default=DEFAULT_TOP_DONATIONS_COUNT,
+        description=(
+            "Combien de streamers afficher dans « Top Donations par streamer ». "
+            "0 masque complètement l'embed. Le champ Discord étant plafonné à "
+            "1024 caractères, un nombre élevé peut être réduit à l'affichage."
+        ),
+    )
     zeventGoalsVelocityWeight: float = ui(
         "Poids de la vitesse (donation goals)",
         "number",
@@ -345,6 +356,14 @@ PLANNING_COUNT = _parse_count(
     _cfg.get("zeventPlanningCount", DEFAULT_PLANNING_COUNT),
     DEFAULT_PLANNING_COUNT,
     "nombre d'évènements du planning",
+    maximum=25,
+)
+# Une seule ligne par streamer, toutes dans le même champ : c'est le plafond
+# de 1024 caractères qui mord en premier, d'où la même limite haute.
+TOP_DONATIONS_COUNT = _parse_count(
+    _cfg.get("zeventTopDonationsCount", DEFAULT_TOP_DONATIONS_COUNT),
+    DEFAULT_TOP_DONATIONS_COUNT,
+    "nombre de streamers du top donations",
     maximum=25,
 )
 GOALS_VELOCITY_WEIGHT = _parse_weight(

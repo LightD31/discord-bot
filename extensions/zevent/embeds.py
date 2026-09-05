@@ -19,6 +19,7 @@ from ._common import (
     SHOW_OFFLINE_STREAMERS,
     STATS_API_URL,
     STREAMLABS_API_URL,
+    TOP_DONATIONS_COUNT,
     TWITCH_URL,
     StreamerInfo,
     split_streamer_list,
@@ -402,9 +403,13 @@ class EmbedsMixin:
         return embed
 
     def create_top_donations_embed(self, streams: list[dict]) -> Embed | None:
-        """Leaderboard embed for top streamers by donation amount (top 5, gold theme)."""
+        """Leaderboard embed for the top collecting streamers (gold theme).
+
+        How many entries it lists is the guild's call; ``0`` drops the embed
+        entirely rather than rendering an empty one.
+        """
         try:
-            if not streams:
+            if not streams or TOP_DONATIONS_COUNT <= 0:
                 return None
 
             streamers_with_donations = []
@@ -433,34 +438,32 @@ class EmbedsMixin:
             embed.set_footer(source_footer(SOURCE_ZEVENT))
             embed.timestamp = utils.timestamp_converter(datetime.now())
 
-            leaderboard_text = ""
-            max_streamers = 5
+            # Build up to the 1024-char field limit a whole line at a time, so
+            # a generous configured count degrades by dropping tail entries
+            # rather than by having the field rejected.
+            lines: list[str] = []
+            used = 0
+            for i, streamer in enumerate(top_streamers[:TOP_DONATIONS_COUNT], 1):
+                if i == 1:
+                    medal = "🥇"
+                elif i == 2:
+                    medal = "🥈"
+                elif i == 3:
+                    medal = "🥉"
+                else:
+                    medal = f"{i}."
 
-            for _ in range(3):
-                leaderboard_text = ""
-                current_top = top_streamers[:max_streamers]
-
-                for i, streamer in enumerate(current_top, 1):
-                    if i == 1:
-                        medal = "🥇"
-                    elif i == 2:
-                        medal = "🥈"
-                    elif i == 3:
-                        medal = "🥉"
-                    else:
-                        medal = f"{i}."
-
-                    display_name = streamer["display"].replace("_", "\\_")
-                    leaderboard_text += (
-                        f"{medal} **{display_name}** - {streamer['donation_formatted']}\n"
-                    )
-
-                if len(leaderboard_text) <= 1000:
+                display_name = streamer["display"].replace("_", "\\_")
+                entry = f"{medal} **{display_name}** - {streamer['donation_formatted']}"
+                if used + len(entry) + 1 > 1024:
                     break
+                lines.append(entry)
+                used += len(entry) + 1
 
-                max_streamers = max(3, max_streamers - 1)
+            if not lines:
+                return None
 
-            embed.add_field(name="Top donations", value=leaderboard_text, inline=False)
+            embed.add_field(name="Top donations", value="\n".join(lines), inline=False)
 
             return embed
         except Exception as e:
