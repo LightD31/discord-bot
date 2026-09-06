@@ -5,12 +5,14 @@ Payload shapes are copied from the live EvenMoreStats API (2026 edition).
 
 from datetime import UTC, datetime
 
+from features.zevent.models import Participant
 from features.zevent.stats import (
     LAN,
     ONLINE,
     build_location_index,
     event_end,
     event_schedule,
+    goal_progress,
     goal_score,
     is_live,
     location_bucket,
@@ -315,6 +317,55 @@ def test_upcoming_goals_ranks_on_score_not_live_status() -> None:
 
     assert [p.twitch_login for p in ranked] == ["alderiate", "aducine"]
     assert upcoming_goals(participants, limit=1)[0].twitch_login == "alderiate"
+
+
+def _refunded_participant(raised_centimes: int) -> list[Participant]:
+    """One streamer whose total went negative, plus a healthy neighbour."""
+    payload = [
+        {
+            "name": "Remboursé",
+            "location": "lan",
+            "amount_raised": raised_centimes,
+            "next_donation_goal": {"name": "palier", "amount": 100_000},
+            "socials": {"twitch": {"id": "1", "login": "rembourse"}},
+        },
+        {
+            "name": "Normal",
+            "location": "lan",
+            "amount_raised": 50_000,
+            "next_donation_goal": {"name": "palier", "amount": 100_000},
+            "socials": {"twitch": {"id": "2", "login": "normal"}},
+        },
+    ]
+    return parse_participants(payload)
+
+
+def test_a_refunded_total_does_not_make_progress_negative() -> None:
+    """`goal_progress` promises [0, 1]; a chargeback used to break that."""
+    refunded, _ = _refunded_participant(-2_000)
+
+    assert refunded.amount_raised == -20.0
+    assert goal_progress(refunded) == 0.0
+
+
+def test_a_refunded_total_keeps_the_score_a_real_number() -> None:
+    """The reported crash.
+
+    A negative progress raised to a non-integral weight is *complex* in
+    Python, and `complex * 0.0` stays complex — so the bad score survived
+    every later multiplication and only surfaced when `upcoming_goals`
+    sorted, killing the whole refresh with
+    "'<' not supported between instances of 'complex' and 'float'".
+    """
+    participants = _refunded_participant(-2_000)
+
+    for weight in (0.5, 1.0, 1.2, 1.5, 2.0):
+        for participant in participants:
+            score = goal_score(participant, progress_weight=weight)
+            assert isinstance(score, float), (weight, participant.display_name, score)
+
+        ranked = upcoming_goals(participants, progress_weight=weight)
+        assert [p.display_name for p in ranked] == ["Normal", "Remboursé"]
 
 
 def test_upcoming_goals_is_empty_without_goals() -> None:

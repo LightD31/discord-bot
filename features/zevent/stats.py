@@ -201,11 +201,23 @@ VELOCITY_HORIZON_MINUTES = 10.0
 
 
 def goal_progress(participant: Participant) -> float:
-    """How far along ``participant`` is toward its next goal, in ``[0, 1]``."""
+    """How far along ``participant`` is toward its next goal, in ``[0, 1]``.
+
+    Clamped at both ends, and the lower one is not theoretical: a refunded or
+    charged-back donation puts ``amount_raised`` below zero, and a negative
+    progress reaching ``goal_score``'s ``progress ** weight`` makes Python
+    return a *complex* number for any non-integral weight. That poisons the
+    score all the way through (``complex * 0.0`` is still ``0j``) until
+    ``upcoming_goals`` sorts it and the whole refresh dies on
+    ``'<' not supported between instances of 'complex' and 'float'``.
+
+    Below zero there is simply no progress toward the goal, so ``0`` is also
+    the honest answer.
+    """
     goal = participant.next_goal
     if goal is None or goal.amount <= 0:
         return 0.0
-    return min(participant.amount_raised / goal.amount, 1.0)
+    return min(max(participant.amount_raised / goal.amount, 0.0), 1.0)
 
 
 def is_live(participant: Participant, live_logins: set[str] | None = None) -> bool:
