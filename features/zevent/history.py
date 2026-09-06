@@ -66,11 +66,13 @@ class DonationCurve:
     event_start: datetime | None = None
     """That edition's ``schedule_raising.start`` — the anchor for aligning."""
     final_total: float | None = None
-    """That edition's own published total, in euros, when the file states one.
+    """That edition's final total in euros, as reported by the API listing.
 
-    Independent of the curve, and the only trustworthy figure when the curve
-    is truncated: the 2025 recording stops nearly three hours early, 480 000 €
-    short of what that edition actually raised.
+    Supplied by the caller from ``amount_raised``, which is the only figure
+    that knows what an edition actually raised. The metrics file cannot: its
+    top-level ``donation_amount`` is the *recording's* total, and a truncated
+    recording understates the edition by however much it missed — 2025 files
+    16 182 382 € against the 16 658 660 € it really raised.
     """
 
     @property
@@ -98,28 +100,34 @@ class DonationCurve:
 
     @property
     def record(self) -> float:
-        """What that edition finished on — the figure a later one has to beat.
+        """What that edition finished on, best known — never below its curve.
 
-        The published total when the file carries one, and never less than the
-        curve's last sample: a record understated by a truncated recording
-        would have this year's tracker announce it broken while it still
-        stands.
+        The API's total when the caller supplied one; otherwise the file's own,
+        which is only ever the recording's. Both are floored at the curve's
+        last sample, which is standing proof the edition got at least that far.
         """
         return max(self.final_total or 0.0, self.total)
 
 
 def parse_metrics(
-    payload: Any, label: str, event_start: datetime | None = None
+    payload: Any,
+    label: str,
+    event_start: datetime | None = None,
+    final_total: float | None = None,
 ) -> DonationCurve | None:
     """Parse a ``metrics/{event}/global.json`` body into a curve.
 
     Returns ``None`` for anything unusable, so a malformed or truncated cache
     file simply disables the comparison rather than breaking a notification.
 
+    ``final_total`` is that edition's real total in euros, which only the API
+    listing knows (``amount_raised``); pass it whenever it is available.
+
     Note the units: the file's top-level ``donation_amount`` is in centimes,
-    but the graph values are already euros. Both are read — the graph for the
-    curve, the top-level total for :attr:`DonationCurve.record`, which the
-    graph alone cannot give when the recording is truncated.
+    while the graph values are already euros. That top-level figure is only
+    the recording's own total — for 2025 it sits 4 k€ above a curve that
+    stops 476 k€ short of the edition — so it stands in for ``final_total``
+    only when the caller has nothing better.
     """
     if not isinstance(payload, dict):
         return None
@@ -142,12 +150,15 @@ def parse_metrics(
     # The published order is not guaranteed ascending — the 2024 file ships its
     # viewer labels reversed — so sort before anything reads the first sample.
     pairs.sort()
-    published = payload.get("donation_amount")
+    if final_total is None:
+        published = payload.get("donation_amount")
+        if isinstance(published, int | float):
+            final_total = float(published) / 100
     return DonationCurve(
         label=label,
         points=pairs,
         event_start=event_start,
-        final_total=float(published) / 100 if isinstance(published, int | float) else None,
+        final_total=final_total,
     )
 
 
@@ -271,6 +282,37 @@ def comparable_editions(events: list[dict], tracked: dict) -> list[dict]:
     return [event for _, event in sorted(peers, key=lambda pair: pair[0], reverse=True)]
 
 
+def event_total(event: dict) -> float | None:
+    """That edition's final total in euros, from the listing's ``amount_raised``.
+
+    In centimes on the wire, like every other amount the API serves.
+    """
+    amount = event.get("amount_raised") if isinstance(event, dict) else None
+    return float(amount) / 100 if isinstance(amount, int | float) else None
+
+
+def previous_record(events: list[dict], tracked: dict) -> tuple[str, float] | None:
+    """The best any past edition of the series managed: ``(label, euros)``.
+
+    The *highest* total, not the most recent one. They are not the same thing
+    and the series proves it: ZEvent 2024 raised 10 145 881 €, below the
+    10 182 126 € of 2022, so a tracker measuring itself against last year
+    would have called the record broken 36 245 € early.
+
+    Read from the ``/events`` listing the tracker already holds, so this costs
+    no request and needs no metrics file — an edition whose curve was never
+    published still counts toward the record it set.
+    """
+    best: tuple[str, float] | None = None
+    for event in comparable_editions(events, tracked):
+        total = event_total(event)
+        if total is None or total <= 0:
+            continue
+        if best is None or total > best[1]:
+            best = (edition_label(str(event.get("name") or "")), total)
+    return best
+
+
 def _start_of(event: dict) -> str | None:
     schedule = event.get("schedule")
     start = schedule.get("start") if isinstance(schedule, dict) else None
@@ -326,12 +368,17 @@ def compare_milestone(
 
 
 def record_message(
-    curve: DonationCurve,
+    label: str,
+    record: float,
     total: float,
     now: datetime,
     main_start: datetime,
 ) -> str:
-    """The announcement for this edition passing a past one's final total.
+    """The announcement for this edition passing the series' best total.
+
+    Takes the record and whose it was rather than a curve: the record comes
+    from the API listing, which covers every edition, while a curve exists
+    only for the few whose metrics file was published.
 
     The headline is the record falling; the second line says how far into the
     marathon it fell, which is the part that dates the feat. That duration is
@@ -340,8 +387,8 @@ def record_message(
     unlikely but not impossible.
     """
     lines = [
-        f"🏆 **Record battu !** Le total dépasse les {format_euros(curve.record)} "
-        f"de {curve.label} — {format_euros(total)} récoltés ! 🏆"
+        f"🏆 **Record battu !** Le total dépasse les {format_euros(record)} "
+        f"de {label} — {format_euros(total)} récoltés ! 🏆"
     ]
     elapsed = (now - main_start).total_seconds()
     if elapsed > 0:

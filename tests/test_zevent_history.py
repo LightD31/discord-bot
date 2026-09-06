@@ -23,6 +23,7 @@ from features.zevent.history import (
     format_euros,
     format_moment,
     parse_metrics,
+    previous_record,
     reached_at,
     record_message,
 )
@@ -339,25 +340,40 @@ def test_editions_without_a_usable_start_are_skipped_not_compared() -> None:
 
 
 # ── the record a past edition set ────────────────────────────────────
+#
+# Real figures, read from the live API and the published 2025 metrics file:
+#   /events amount_raised     16 658 660 €   what 2025 actually raised
+#   file donation_amount      16 182 382 €   what its recording totalled
+#   curve last sample         16 178 394 €   where that recording stops
+# The gap between the first and the rest is the edition's missing last hours.
+
+REAL_2025_TOTAL = 16_658_660.0
+REAL_2025_FILE_TOTAL = 16_182_382.43
+REAL_2025_CURVE_END = 16_178_394.01
 
 
-def test_the_record_is_the_published_total_not_the_last_sample() -> None:
-    """The 2025 recording stops 480 000 € short of what it actually raised.
+def _truncated_2025() -> dict:
+    payload = _payload([164_452.26, 8_000_000, REAL_2025_CURVE_END])
+    payload["donation_amount"] = int(REAL_2025_FILE_TOTAL * 100)
+    return payload
 
-    Taking the curve's last sample as the record would have this year's
-    tracker announce it broken while it still stood.
-    """
-    payload = _payload([0, 1_000_000, 15_600_000])
-    payload["donation_amount"] = 16_080_000_00  # centimes, unlike the graph
 
-    curve = parse_metrics(payload, "2025", REF_RAISING)
+def test_the_api_total_wins_over_the_file_and_the_curve() -> None:
+    """The file's own total is not the edition's: it stops where the tape does."""
+    curve = parse_metrics(_truncated_2025(), "2025", REF_RAISING, final_total=REAL_2025_TOTAL)
     assert curve is not None
-    assert curve.total == 15_600_000
-    assert curve.final_total == 16_080_000
-    assert curve.record == 16_080_000
+    assert curve.total == REAL_2025_CURVE_END
+    assert curve.record == REAL_2025_TOTAL
 
 
-def test_the_record_falls_back_on_the_curve_without_a_published_total() -> None:
+def test_the_file_total_stands_in_when_the_api_total_is_unknown() -> None:
+    """Better than the curve by 4 k€ — and never mistaken for the truth."""
+    curve = parse_metrics(_truncated_2025(), "2025", REF_RAISING)
+    assert curve is not None
+    assert curve.record == REAL_2025_FILE_TOTAL
+
+
+def test_the_record_falls_back_on_the_curve_without_any_total() -> None:
     payload = _payload([0, 1_000_000, 4_000_000])
     del payload["donation_amount"]
 
@@ -367,58 +383,140 @@ def test_the_record_falls_back_on_the_curve_without_a_published_total() -> None:
     assert curve.record == 4_000_000
 
 
-def test_a_published_total_below_the_curve_never_lowers_the_record() -> None:
-    """Whatever the file says, the curve is proof the edition got that far."""
+def test_a_total_below_the_curve_never_lowers_the_record() -> None:
+    """Whatever anyone reports, the curve is proof the edition got that far."""
     payload = _payload([0, 1_000_000, 4_000_000])
-    payload["donation_amount"] = 1_500_000_00
 
-    curve = parse_metrics(payload, "2025", REF_RAISING)
+    curve = parse_metrics(payload, "2025", REF_RAISING, final_total=1_500_000)
     assert curve is not None
     assert curve.record == 4_000_000
 
 
 def test_a_milestone_the_truncated_curve_misses_is_not_called_unreached() -> None:
-    """Between the curve's end and the published total, only the fact is known."""
-    payload = _payload([0, 1_000_000, 15_600_000])
-    payload["donation_amount"] = 16_080_000_00
-    curve = parse_metrics(payload, "2025", REF_RAISING)
+    """Between the curve's end and the real total, only the fact is known."""
+    curve = parse_metrics(_truncated_2025(), "2025", REF_RAISING, final_total=REAL_2025_TOTAL)
     assert curve is not None
 
-    line = compare_milestone(curve, 15_900_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
+    line = compare_milestone(curve, 16_400_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
     assert line is not None
     assert "Jamais atteint" not in line
     assert "Dépassé en 2025" in line
-    assert "16 080 000 €" in line
+    assert "16 658 660 €" in line
 
 
-def test_a_milestone_above_the_published_total_was_never_reached() -> None:
-    payload = _payload([0, 1_000_000, 15_600_000])
-    payload["donation_amount"] = 16_080_000_00
-    curve = parse_metrics(payload, "2025", REF_RAISING)
+def test_a_milestone_above_the_real_total_was_never_reached() -> None:
+    curve = parse_metrics(_truncated_2025(), "2025", REF_RAISING, final_total=REAL_2025_TOTAL)
     assert curve is not None
 
-    line = compare_milestone(curve, 20_000_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
+    line = compare_milestone(curve, 17_000_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
     assert line is not None
     assert "Jamais atteint en 2025" in line
-    assert "16 080 000 €" in line
+    assert "16 658 660 €" in line
+
+
+# ── which edition holds the record ───────────────────────────────────
+
+GROUP = "019f5bad-f48a-7cda-9817-ffba311f987c"
+# The real series, with the totals the API reports (centimes on the wire).
+SERIES = [
+    {
+        "id": "2021",
+        "name": "ZEvent 2021",
+        "amount_raised": 1_006_448_000,
+        "event_group_id": GROUP,
+        "schedule": {"start": "2021-10-28T19:00:00Z"},
+    },
+    {
+        "id": "2022",
+        "name": "ZEvent 2022",
+        "amount_raised": 1_018_212_600,
+        "event_group_id": GROUP,
+        "schedule": {"start": "2022-09-08T19:00:00Z"},
+    },
+    {
+        "id": "2024",
+        "name": "ZEvent 2024",
+        "amount_raised": 1_014_588_100,
+        "event_group_id": GROUP,
+        "schedule": {"start": "2024-09-05T19:00:00Z"},
+    },
+    {
+        "id": "2025",
+        "name": "ZEvent 2025",
+        "amount_raised": 1_665_866_000,
+        "event_group_id": GROUP,
+        "schedule": {"start": "2025-09-04T10:00:00Z"},
+    },
+    {
+        "id": "2026",
+        "name": "ZEvent 2026",
+        "amount_raised": 1_670_079_729,
+        "event_group_id": GROUP,
+        "schedule": {"start": "2026-09-03T18:00:00Z"},
+    },
+]
+TRACKED_2026 = SERIES[-1]
+TRACKED_2025 = SERIES[-2]
+
+
+def test_the_record_is_the_best_past_edition() -> None:
+    assert previous_record(SERIES, TRACKED_2026) == ("2025", 16_658_660.0)
+
+
+def test_the_record_is_not_merely_last_year() -> None:
+    """2024 finished 36 245 € below 2022, so 2025's record to beat was 2022's.
+
+    Comparing against the most recent edition would have announced the record
+    broken while it still stood — the bug this test exists to pin down.
+    """
+    assert previous_record(SERIES, TRACKED_2025) == ("2022", 10_182_126.0)
+
+
+def test_the_tracked_edition_never_counts_as_its_own_record() -> None:
+    label, record = previous_record(SERIES, TRACKED_2026) or ("", 0.0)
+    assert record < TRACKED_2026["amount_raised"] / 100
+    assert label == "2025"
+
+
+def test_editions_without_a_usable_total_are_skipped() -> None:
+    series = [dict(e) for e in SERIES]
+    series[3].pop("amount_raised")  # 2025 has no figure
+    series[1]["amount_raised"] = "beaucoup"
+
+    # 2025 and 2022 both drop out, so the best remaining is 2024.
+    assert previous_record(series, TRACKED_2026) == ("2024", 10_145_881.0)
+
+
+def test_no_comparable_edition_means_no_record() -> None:
+    lone = {
+        "id": "solo",
+        "name": "Charity Stream",
+        "amount_raised": 500_000,
+        "schedule": {"start": "2026-01-01T00:00:00Z"},
+    }
+    assert previous_record([lone], lone) is None
 
 
 # ── the record announcement ──────────────────────────────────────────
 
 
 def test_the_record_message_names_both_totals_and_the_edition() -> None:
-    message = record_message(CURVE, 16_012_500, datetime(2026, 9, 6, 21, 0, tzinfo=UTC), THIS_START)
+    message = record_message(
+        "2025", REAL_2025_TOTAL, 16_700_797, datetime(2026, 9, 6, 21, 0, tzinfo=UTC), THIS_START
+    )
 
     assert "Record battu" in message
-    assert "16 000 000 €" in message  # the record that just fell
-    assert "16 012 500 €" in message  # where this edition stands
+    assert "16 658 660 €" in message  # the record that just fell
+    assert "16 700 797 €" in message  # where this edition stands
     assert "2025" in message
     assert "2 j 5 h de marathon" in message
 
 
 def test_the_record_message_omits_a_duration_before_the_marathon_opens() -> None:
     """A crossing during the pre-event concert would render a negative delay."""
-    message = record_message(CURVE, 16_012_500, datetime(2026, 9, 3, 21, 0, tzinfo=UTC), THIS_START)
+    message = record_message(
+        "2025", REAL_2025_TOTAL, 16_700_797, datetime(2026, 9, 3, 21, 0, tzinfo=UTC), THIS_START
+    )
 
     assert "Record battu" in message
     assert "marathon" not in message
