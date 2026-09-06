@@ -387,7 +387,12 @@ class TasksMixin:
             logger.error(f"Marqueur de record non enregistré : {e}")
 
     async def check_and_send_record(self, total_amount: float) -> None:
-        """Announce this edition passing the reference edition's final total, once.
+        """Announce this edition passing the series' best total, once.
+
+        The record is the *highest* past edition, not the most recent one —
+        ZEvent 2024 finished below 2022, so "last year" would have called it
+        36 245 € early — and it is read from the API listing rather than a
+        metrics file, which most editions never published.
 
         Three states, persisted per edition: ``None`` — never read; ``False`` —
         read while still below the record; ``True`` — announced (or written off
@@ -402,11 +407,14 @@ class TasksMixin:
             if self._record_state:
                 return
 
-            curve = await self._ensure_reference_curve()
-            if curve is None or curve.record <= 0:
+            best = await self.reference_record()
+            if best is None:
+                return
+            label, record = best
+            if record <= 0:
                 return
 
-            if total_amount < curve.record:
+            if total_amount < record:
                 if self._record_state is None:
                     self._record_state = False
                     await self._store_record_state(False)
@@ -414,12 +422,14 @@ class TasksMixin:
 
             if self._record_state is None:
                 logger.info(
-                    f"Record de {curve.label} ({format_euros(curve.record)}) déjà dépassé "
-                    f"à la première lecture ({format_euros(total_amount)}) — rien à annoncer."
+                    f"Record de {label} ({format_euros(record)}) déjà dépassé à la "
+                    f"première lecture ({format_euros(total_amount)}) — rien à annoncer."
                 )
             elif self.channel and hasattr(self.channel, "send"):
                 await self.channel.send(
-                    record_message(curve, total_amount, datetime.now(UTC), self._main_event_start)
+                    record_message(
+                        label, record, total_amount, datetime.now(UTC), self._main_event_start
+                    )
                 )
             else:
                 # Unlike a palier, this one never comes round again — leave it

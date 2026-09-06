@@ -9,7 +9,9 @@ from features.zevent.history import (
     DonationCurve,
     comparable_editions,
     edition_label,
+    event_total,
     parse_metrics,
+    previous_record,
 )
 from features.zevent.models import Participant, Show
 from features.zevent.stats import (
@@ -267,7 +269,12 @@ class ApiMixin:
                 parse_datetime(schedule.get("start")) if isinstance(schedule, dict) else None
             )
             curve = parse_metrics(
-                payload, edition_label(str(event.get("name") or "")), reference_start
+                payload,
+                edition_label(str(event.get("name") or "")),
+                reference_start,
+                # The listing knows what that edition actually raised; the
+                # file only knows what its recording caught.
+                final_total=event_total(event),
             )
             if curve is not None:
                 self._reference_curve = curve
@@ -281,6 +288,18 @@ class ApiMixin:
         self._reference_gate.failed(now)
         logger.warning("Aucune édition de référence exploitable pour la comparaison")
         return self._reference_curve
+
+    async def reference_record(self) -> tuple[str, float] | None:
+        """The best total any past edition of this series reached, and whose.
+
+        Comes from the ``/events`` listing already cached for the schedule, so
+        it needs neither a request of its own nor a published metrics file —
+        unlike the comparison curve, which many editions simply do not have.
+        """
+        tracked = await self._ensure_stats_event()
+        if tracked is None:
+            return None
+        return previous_record(self._stats_events, tracked)
 
     def _validate_api_data(self, data: Any, data_type: str) -> bool:
         try:
