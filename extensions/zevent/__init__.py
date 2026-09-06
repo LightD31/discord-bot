@@ -63,6 +63,10 @@ class Zevent(
         # baseline, not an announcement.
         self.last_milestone: int | None = None
         self._milestone_lock = asyncio.Lock()
+        # ``None`` until the first total is read, ``False`` once read while the
+        # reference edition's record still stood, ``True`` once it fell.
+        self._record_state: bool | None = None
+        self._record_lock = asyncio.Lock()
         self.last_data_cache: dict | None = None
         self.last_update_time = None
         self._stats_event: dict | None = None
@@ -136,8 +140,9 @@ class Zevent(
             # Re-attach the scheduled event this bot created before the restart
             # so the refresh loop edits it instead of creating a duplicate.
             await self.recover_scheduled_event()
-            # After the edition is resolved: the marker is stored per edition.
+            # After the edition is resolved: the markers are stored per edition.
             await self.load_milestone_marker()
+            await self.load_record_marker()
             logger.info("Zevent extension initialized successfully")
             self.zevent.start()
             await self.zevent()

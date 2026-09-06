@@ -1,4 +1,4 @@
-"""Scheduled update loop + donation milestone announcements."""
+"""Scheduled update loop + donation milestone and record announcements."""
 
 import asyncio
 import os
@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from interactions import Embed, File, IntervalTrigger, Task, utils
 
-from features.zevent.history import compare_milestone
+from features.zevent.history import compare_milestone, format_euros, record_message
 from features.zevent.repository import ZeventStateRepository
 from src.core import logging as logutil
 from src.core.http import fetch
@@ -187,6 +187,7 @@ class TasksMixin:
 
                 if data:
                     await self.check_and_send_milestone(total_int)
+                    await self.check_and_send_record(total_int)
                 return
 
             if not data and not self.last_data_cache:
@@ -250,6 +251,7 @@ class TasksMixin:
                     logger.debug("Message updated successfully")
 
                 await self.check_and_send_milestone(total_int)
+                await self.check_and_send_record(total_int)
 
         except Exception as e:
             logger.error(f"Unexpected error in zevent task: {e}")
@@ -347,6 +349,86 @@ class TasksMixin:
                     )
                 self.last_milestone = current_milestone
                 await self._store_milestone_marker(current_milestone)
+
+    # ─── Record de l'édition précédente ───────────────────────────────
+
+    async def load_record_marker(self) -> None:
+        """Restore whether this edition's record announcement already went out.
+
+        Also restores the "seen below the record" state, which is what lets a
+        crossing that happened while the bot was down still be announced
+        instead of being mistaken for one the tracker never witnessed.
+        """
+        if GUILD_ID is None:
+            return
+        event = self._stats_event or {}
+        event_id = str(event.get("id") or "") or None
+        try:
+            self._record_state = await ZeventStateRepository(GUILD_ID).load_record(event_id)
+        except Exception as e:
+            # As broad as the milestone marker's, and for the same reasons: an
+            # unreachable (or unconfigured) database costs resilience across
+            # restarts, never an announcement.
+            logger.error(f"Marqueur de record illisible en base : {e}")
+            return
+        if self._record_state is not None:
+            logger.info(f"Record déjà annoncé : {self._record_state}")
+
+    async def _store_record_state(self, announced: bool) -> None:
+        """Persist the record marker so a restart resumes where this left off."""
+        if GUILD_ID is None:
+            return
+        event = self._stats_event or {}
+        try:
+            await ZeventStateRepository(GUILD_ID).save_record(
+                str(event.get("id") or "") or None, announced
+            )
+        except Exception as e:
+            logger.error(f"Marqueur de record non enregistré : {e}")
+
+    async def check_and_send_record(self, total_amount: float) -> None:
+        """Announce this edition passing the reference edition's final total, once.
+
+        Three states, persisted per edition: ``None`` — never read; ``False`` —
+        read while still below the record; ``True`` — announced (or written off
+        as already broken). The middle state is the point of the whole thing:
+        only a tracker that saw this edition *below* the record can honestly
+        claim to have watched it fall, so an edition first read from above it
+        (a tracker configured mid-marathon) is silently written off instead.
+        """
+        # Same reason as the milestone lock: overlapping runs of the refresh
+        # task must not both pass the comparison and announce twice.
+        async with self._record_lock:
+            if self._record_state:
+                return
+
+            curve = await self._ensure_reference_curve()
+            if curve is None or curve.record <= 0:
+                return
+
+            if total_amount < curve.record:
+                if self._record_state is None:
+                    self._record_state = False
+                    await self._store_record_state(False)
+                return
+
+            if self._record_state is None:
+                logger.info(
+                    f"Record de {curve.label} ({format_euros(curve.record)}) déjà dépassé "
+                    f"à la première lecture ({format_euros(total_amount)}) — rien à annoncer."
+                )
+            elif self.channel and hasattr(self.channel, "send"):
+                await self.channel.send(
+                    record_message(curve, total_amount, datetime.now(UTC), self._main_event_start)
+                )
+            else:
+                # Unlike a palier, this one never comes round again — leave it
+                # pending rather than burning it on a channel that cannot send.
+                logger.error("Cannot send record message: channel not available")
+                return
+
+            self._record_state = True
+            await self._store_record_state(True)
 
     async def send_simplified_update(self, total_amount: str):
         """Fallback embed used when API fetch and cache both fail."""

@@ -24,6 +24,7 @@ from features.zevent.history import (
     format_moment,
     parse_metrics,
     reached_at,
+    record_message,
 )
 
 HOUR_MS = 3_600_000
@@ -335,3 +336,89 @@ def test_editions_without_a_usable_start_are_skipped_not_compared() -> None:
         "not even a dict",
     ]
     assert [e["id"] for e in comparable_editions(broken, EVENTS[0])] == ["2025"]
+
+
+# ── the record a past edition set ────────────────────────────────────
+
+
+def test_the_record_is_the_published_total_not_the_last_sample() -> None:
+    """The 2025 recording stops 480 000 € short of what it actually raised.
+
+    Taking the curve's last sample as the record would have this year's
+    tracker announce it broken while it still stood.
+    """
+    payload = _payload([0, 1_000_000, 15_600_000])
+    payload["donation_amount"] = 16_080_000_00  # centimes, unlike the graph
+
+    curve = parse_metrics(payload, "2025", REF_RAISING)
+    assert curve is not None
+    assert curve.total == 15_600_000
+    assert curve.final_total == 16_080_000
+    assert curve.record == 16_080_000
+
+
+def test_the_record_falls_back_on_the_curve_without_a_published_total() -> None:
+    payload = _payload([0, 1_000_000, 4_000_000])
+    del payload["donation_amount"]
+
+    curve = parse_metrics(payload, "2025", REF_RAISING)
+    assert curve is not None
+    assert curve.final_total is None
+    assert curve.record == 4_000_000
+
+
+def test_a_published_total_below_the_curve_never_lowers_the_record() -> None:
+    """Whatever the file says, the curve is proof the edition got that far."""
+    payload = _payload([0, 1_000_000, 4_000_000])
+    payload["donation_amount"] = 1_500_000_00
+
+    curve = parse_metrics(payload, "2025", REF_RAISING)
+    assert curve is not None
+    assert curve.record == 4_000_000
+
+
+def test_a_milestone_the_truncated_curve_misses_is_not_called_unreached() -> None:
+    """Between the curve's end and the published total, only the fact is known."""
+    payload = _payload([0, 1_000_000, 15_600_000])
+    payload["donation_amount"] = 16_080_000_00
+    curve = parse_metrics(payload, "2025", REF_RAISING)
+    assert curve is not None
+
+    line = compare_milestone(curve, 15_900_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
+    assert line is not None
+    assert "Jamais atteint" not in line
+    assert "Dépassé en 2025" in line
+    assert "16 080 000 €" in line
+
+
+def test_a_milestone_above_the_published_total_was_never_reached() -> None:
+    payload = _payload([0, 1_000_000, 15_600_000])
+    payload["donation_amount"] = 16_080_000_00
+    curve = parse_metrics(payload, "2025", REF_RAISING)
+    assert curve is not None
+
+    line = compare_milestone(curve, 20_000_000, datetime(2026, 9, 6, 20, 0, tzinfo=UTC), THIS_START)
+    assert line is not None
+    assert "Jamais atteint en 2025" in line
+    assert "16 080 000 €" in line
+
+
+# ── the record announcement ──────────────────────────────────────────
+
+
+def test_the_record_message_names_both_totals_and_the_edition() -> None:
+    message = record_message(CURVE, 16_012_500, datetime(2026, 9, 6, 21, 0, tzinfo=UTC), THIS_START)
+
+    assert "Record battu" in message
+    assert "16 000 000 €" in message  # the record that just fell
+    assert "16 012 500 €" in message  # where this edition stands
+    assert "2025" in message
+    assert "2 j 5 h de marathon" in message
+
+
+def test_the_record_message_omits_a_duration_before_the_marathon_opens() -> None:
+    """A crossing during the pre-event concert would render a negative delay."""
+    message = record_message(CURVE, 16_012_500, datetime(2026, 9, 3, 21, 0, tzinfo=UTC), THIS_START)
+
+    assert "Record battu" in message
+    assert "marathon" not in message
