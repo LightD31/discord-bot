@@ -65,6 +65,13 @@ class DonationCurve:
     """``(timestamp, euros)``, ascending."""
     event_start: datetime | None = None
     """That edition's ``schedule_raising.start`` — the anchor for aligning."""
+    final_total: float | None = None
+    """That edition's own published total, in euros, when the file states one.
+
+    Independent of the curve, and the only trustworthy figure when the curve
+    is truncated: the 2025 recording stops nearly three hours early, 480 000 €
+    short of what that edition actually raised.
+    """
 
     @property
     def start(self) -> datetime:
@@ -89,6 +96,17 @@ class DonationCurve:
     def total(self) -> float:
         return self.points[-1][1] if self.points else 0.0
 
+    @property
+    def record(self) -> float:
+        """What that edition finished on — the figure a later one has to beat.
+
+        The published total when the file carries one, and never less than the
+        curve's last sample: a record understated by a truncated recording
+        would have this year's tracker announce it broken while it still
+        stands.
+        """
+        return max(self.final_total or 0.0, self.total)
+
 
 def parse_metrics(
     payload: Any, label: str, event_start: datetime | None = None
@@ -99,7 +117,9 @@ def parse_metrics(
     file simply disables the comparison rather than breaking a notification.
 
     Note the units: the file's top-level ``donation_amount`` is in centimes,
-    but the graph values are already euros. Only the graph is read here.
+    but the graph values are already euros. Both are read — the graph for the
+    curve, the top-level total for :attr:`DonationCurve.record`, which the
+    graph alone cannot give when the recording is truncated.
     """
     if not isinstance(payload, dict):
         return None
@@ -122,7 +142,13 @@ def parse_metrics(
     # The published order is not guaranteed ascending — the 2024 file ships its
     # viewer labels reversed — so sort before anything reads the first sample.
     pairs.sort()
-    return DonationCurve(label=label, points=pairs, event_start=event_start)
+    published = payload.get("donation_amount")
+    return DonationCurve(
+        label=label,
+        points=pairs,
+        event_start=event_start,
+        final_total=float(published) / 100 if isinstance(published, int | float) else None,
+    )
 
 
 def align(when: datetime, this_start: datetime, reference_start: datetime) -> datetime:
@@ -279,7 +305,12 @@ def compare_milestone(
 
     when = reached_at(curve, milestone)
     if when is None:
-        return f"🏆 Jamais atteint en {curve.label} (record : {format_euros(curve.total)})"
+        if milestone <= curve.record:
+            # That edition did pass this figure — its published total says so —
+            # but the recording stops short of it, so when it crossed is
+            # unknowable. State the fact without inventing an hour.
+            return f"📈 Dépassé en {curve.label} (total final : {format_euros(curve.record)})"
+        return f"🏆 Jamais atteint en {curve.label} (record : {format_euros(curve.record)})"
 
     # Where this moment falls on that edition's calendar — same day of the
     # marathon, same time of day — is what makes the two comparable.
@@ -292,3 +323,27 @@ def compare_milestone(
     if delta > 0:
         return f"⏱️ {format_duration(delta)} d'avance sur {curve.label} (atteint {moment})"
     return f"⏱️ {format_duration(-delta)} de retard sur {curve.label} (atteint {moment})"
+
+
+def record_message(
+    curve: DonationCurve,
+    total: float,
+    now: datetime,
+    main_start: datetime,
+) -> str:
+    """The announcement for this edition passing a past one's final total.
+
+    The headline is the record falling; the second line says how far into the
+    marathon it fell, which is the part that dates the feat. That duration is
+    omitted before the marathon opens rather than rendered negative — remote
+    streamers now go live during the pre-event concert, so a crossing then is
+    unlikely but not impossible.
+    """
+    lines = [
+        f"🏆 **Record battu !** Le total dépasse les {format_euros(curve.record)} "
+        f"de {curve.label} — {format_euros(total)} récoltés ! 🏆"
+    ]
+    elapsed = (now - main_start).total_seconds()
+    if elapsed > 0:
+        lines.append(f"⏱️ Il aura fallu {format_duration(elapsed)} de marathon.")
+    return "\n".join(lines)
